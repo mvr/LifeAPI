@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <bit>
 #include <random>
 #include <vector>
 
@@ -70,9 +71,9 @@ struct __attribute__((aligned(64))) LifeState {
 
   // State is parity of (x + y), so (0, 0) is OFF
   static LifeState Checkerboard() {
-    // TODO: just constantparse it
+    // mvrnote: TODO, just ConstantParse it
     LifeState checkerboard;
-    for (int i = 0; i < N; ++i) {
+    for (int i = 0; i < N; i++) {
       if (i % 2 == 0)
         checkerboard.state[i] = 0xAAAAAAAAAAAAAAAAULL;
       else
@@ -604,7 +605,7 @@ struct __attribute__((aligned(64))) LifeState {
     return result;
   } */
 
-  LifeState NZOI(unsigned distance) {
+  LifeState NZOI(unsigned distance) const {
     return Convolve(LifeState::NZOIAround({0, 0}, distance));
   }
 

@@ -3,8 +3,8 @@
 #include "LifeAPI.hpp"
 #include "Parsing.hpp"
 
-// This uses lifelib "layers" which do not match Golly's state names,
-// so the parsing has to adjust for this.
+// This uses the same convention as lifelib's "layers" which do not
+// match Golly's state names, so the parsing has to adjust for this.
 struct LifeHistory {
   LifeState state;
   LifeState history;
