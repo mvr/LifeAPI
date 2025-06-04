@@ -1117,50 +1117,40 @@ struct __attribute__((aligned(64))) LifeState {
   constexpr static LifeState ConstantParse(const std::string &rle) {
     LifeState result;
 
-    unsigned cnt = 0;
-    unsigned x = 0;
-    unsigned y = 0;
+    int cnt = 0;
+    int x = 0;
+    int y = 0;
 
-    for (char ch : rle) {
+    for (char const ch : rle) {
       if (ch >= '0' && ch <= '9') {
-        cnt = cnt * 10 + (ch - '0');
-        continue;
-      }
-
-      switch (ch) {
-      case 'o': {
+        cnt *= 10;
+        cnt += (ch - '0');
+      } else if (ch == '$') {
         if (cnt == 0)
           cnt = 1;
 
-        for (unsigned j = 0; j < cnt; j++) {
-          result.state[x++] |= (1ULL << y);
-        }
-        cnt = 0;
-        break;
-      }
-      case 'b': {
-        if (cnt == 0)
-          cnt = 1;
-        x += cnt;
-        cnt = 0;
-        break;
-      }
-      case '$': {
+        if (cnt == 129)
+          // TODO: error
+          return result;
+
         y += cnt;
         x = 0;
         cnt = 0;
+      } else if (ch == '!') {
         break;
-      }
-      case '!': {
-        return result;
-      }
-      case '\n':
-      case ' ': {
+      } else if (ch == '\r' || ch == '\n' || ch == ' ') {
         continue;
-      }
-      default: {
-        return LifeState();
-      }
+      } else {
+        if (cnt == 0)
+          cnt = 1;
+
+        for (int j = 0; j < cnt; j++) {
+          if (ch == 'o')
+            result.state[x] |= (1ULL << y);
+          x++;
+        }
+
+        cnt = 0;
       }
     }
 
