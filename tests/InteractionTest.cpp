@@ -27,14 +27,14 @@ TEST(InteractionTest, EaterSelfInteractionTest) {
 }
 
 void TestInteractionCounts(LifeState state) {
-  LifeState bit3(UNINITIALIZED), bit2(UNINITIALIZED), bit1(UNINITIALIZED), bit0(UNINITIALIZED);
+  LifeState bit3(InitializedTag::UNINITIALIZED), bit2(InitializedTag::UNINITIALIZED), bit1(InitializedTag::UNINITIALIZED), bit0(InitializedTag::UNINITIALIZED);
   state.CountNeighbourhood(bit3, bit2, bit1, bit0);
-  LifeState true1(UNINITIALIZED), true2(UNINITIALIZED), trueM(UNINITIALIZED);
+  LifeState true1(InitializedTag::UNINITIALIZED), true2(InitializedTag::UNINITIALIZED), trueM(InitializedTag::UNINITIALIZED);
   true1 = ~state & ~bit3 & ~bit2 & ~bit1 & bit0;
   true2 = ~state & ~bit3 & ~bit2 & bit1 & ~bit0;
   trueM = ~state & (bit3 | bit2 | (bit1 & bit0));
 
-  LifeState fast1(UNINITIALIZED), fast2(UNINITIALIZED), fastM(UNINITIALIZED);
+  LifeState fast1(InitializedTag::UNINITIALIZED), fast2(InitializedTag::UNINITIALIZED), fastM(InitializedTag::UNINITIALIZED);
   state.InteractionCounts(fast1, fast2, fastM);
 
   EXPECT_EQ(true1, fast1);
