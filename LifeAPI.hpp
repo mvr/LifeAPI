@@ -1163,6 +1163,10 @@ struct __attribute__((aligned(64))) LifeState {
 
   inline void Print() const;
   inline std::string RLE() const;
+  
+  inline std::string EncodeApgcode() const;
+  inline std::string EncodeApgcode(unsigned period) const;
+  static inline LifeState DecodeApgcode(const std::string& apgcode);
 
   friend std::ostream &operator<<(std::ostream &os, LifeState const &self) {
     return os << self.RLE();
