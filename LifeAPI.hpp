@@ -676,6 +676,17 @@ struct __attribute__((aligned(64))) LifeState {
     return result;
   }
 
+  std::vector<LifeState> StillComponents() const {
+    LifeState out1, out2, outMore;
+    InteractionCounts(out1, out2, outMore);
+    const LifeState stillzoi = LifeState::ConstantParse("2bo$b3o$5o$b3o$2bo!", -2, -2);
+    auto cs = (*this | outMore).Components(stillzoi);
+    for(auto &c : cs){
+      c &= *this;
+    }
+    return cs;
+  }
+
   ////////////////////////////////
   // Transforms
   ////////////////////////////////
