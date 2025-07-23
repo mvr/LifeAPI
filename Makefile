@@ -1,8 +1,18 @@
-.PHONY: test
+.PHONY: test tools
 
 all: test
 
-CXXFLAGS = -std=c++20 -Wall -Wextra -pedantic
+CXX = clang++
+CXX = /opt/homebrew/opt/llvm/bin/clang++
+CXXFLAGS = -std=c++20 -Wall -Wextra -pedantic -O3 -DNDEBUG -march=native -mtune=native -flto -fno-stack-protector -fomit-frame-pointer -fno-pic
+LDFLAGS =
+
+TOOLS = Transfer
+
+tools: $(TOOLS)
+
+$(TOOLS): %: tools/%.cpp *.hpp
+	$(CXX) $(CXXFLAGS) $(CXXINCLUDE) -o $@ $< $(LDFLAGS)
 
 GTEST_CFLAGS = `pkg-config --cflags gtest_main`
 GTEST_LIBS = `pkg-config --libs gtest_main`
