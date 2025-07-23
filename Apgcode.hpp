@@ -11,7 +11,10 @@ namespace Apgcode {
 
   class Encoder {
   private:
-    static const std::array<char, 32> CHARS;
+    static inline char GetChar(int index) {
+      if (index < 10) return '0' + index;
+      return 'a' + (index - 10);
+    }
     
     static std::string EncodeWechsler(const LifeState& pattern);
     static std::string EncodeRuns(const std::vector<uint8_t>& strip);
@@ -33,14 +36,6 @@ namespace Apgcode {
     static bool IsValidApgcode(const std::string& apgcode);
   };
 
-  // Implementation
-
-  const std::array<char, 32> Encoder::CHARS = {
-    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j',
-    'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't',
-    'u', 'v'
-  };
 
   std::string Encoder::EncodeWechsler(const LifeState& pattern) {
     if (pattern.IsEmpty()) return "";
@@ -104,11 +99,11 @@ namespace Apgcode {
         } else if (runLength >= 4 && runLength <= 39) {
           result += 'y';
           if (runLength <= 13) {
-            result += CHARS[runLength - 4];
+            result += GetChar(runLength - 4);
           } else if (runLength <= 35) {
-            result += CHARS[runLength - 14 + 10];
+            result += GetChar(runLength - 14 + 10);
           } else {
-            result += CHARS[runLength - 36 + 32];
+            result += GetChar(runLength - 36 + 32);
           }
         } else {
           for (size_t j = 0; j < runLength; ++j) {
@@ -116,7 +111,7 @@ namespace Apgcode {
           }
         }
       } else {
-        result += CHARS[strip[i]];
+        result += GetChar(strip[i]);
         i++;
       }
     }
