@@ -50,14 +50,16 @@ TEST(ApgcodeTest, RoundTripApgcode) {
                                     "xs7_25ac",
                                     "xs31_0ca178b96z69d1d96",
                                     "xs37_g8eh6o8zd5llc1uizx343",
-
                                     "xs17_4aabaa4zw252"};
 
   for (auto &apgcode : tests) {
     LifeState decoded = LifeState::DecodeApgcode(apgcode);
-    std::string encoded = decoded.EncodeApgcode();
-
-    EXPECT_EQ(apgcode, encoded);
+    for (int i = -10; i < 10; i++) {
+      for (int j = -10; j < 10; j++) {
+        std::string encoded = decoded.Moved(i, j).EncodeApgcode();
+        EXPECT_EQ(apgcode, encoded);
+      }
+    }
   }
 }
 
