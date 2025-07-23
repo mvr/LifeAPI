@@ -141,3 +141,8 @@ constexpr uint64_t convolve_uint64_t(uint64_t x, uint64_t y) {
   }
   return result;
 }
+
+// Unbelievable that there is no standard way to do this
+[[nodiscard]] inline uint64_t combine_hashes(uint64_t a, uint64_t b) {
+  return a ^ (b + 0x9e3779b9 + (a << 6) + (a >> 2));
+}

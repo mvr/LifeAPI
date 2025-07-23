@@ -3,6 +3,7 @@
 #include <bit>
 
 #include "LifeAPI.hpp"
+#include "Symmetry.hpp"
 
 struct NeighbourCount {
   LifeState bit3;
@@ -12,6 +13,7 @@ struct NeighbourCount {
 
   NeighbourCount()
   : bit3{InitializedTag::UNINITIALIZED}, bit2{InitializedTag::UNINITIALIZED}, bit1{InitializedTag::UNINITIALIZED}, bit0{InitializedTag::UNINITIALIZED} {}
+  NeighbourCount(const LifeState &bit3, const LifeState &bit2, const LifeState &bit1, const LifeState &bit0) : bit3{bit3}, bit2{bit2}, bit1{bit1}, bit0{bit0} {};
 
   NeighbourCount operator~() const {
     NeighbourCount result;
@@ -20,6 +22,15 @@ struct NeighbourCount {
     result.bit1 = ~bit1;
     result.bit0 = ~bit0;
     return result;
+  }
+
+  NeighbourCount Transformed(SymmetryTransform t) const {
+    return {bit3.Transformed(t), bit2.Transformed(t), bit1.Transformed(t),
+            bit0.Transformed(t)};
+  }
+
+  NeighbourCount Moved(std::pair<int, int> p) const {
+    return {bit3.Moved(p), bit2.Moved(p), bit1.Moved(p), bit0.Moved(p)};
   }
 
   static void CountRows(const LifeState &state,
