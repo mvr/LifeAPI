@@ -131,10 +131,6 @@ std::unordered_set<std::string> TransferSynthesis::ApplyTemplates(
       // std::cout << "Template " << templ.RLE() << std::endl;
       LifeState matches = templ.MatchReverse(pattern);
 
-      if (matches.GetPop() > 10) {
-        std::cout << templ.RLE() << std::endl;
-      }
-
       for (auto [x, y] : matches.OnCells()) {
         try {
           LifeState transformedBase = templ.base.Moved(x, y);
