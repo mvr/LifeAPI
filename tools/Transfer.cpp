@@ -146,11 +146,10 @@ std::unordered_set<std::string> TransferSynthesis::ApplyTemplates(
             std::string outputApgcode = resultComp.out.EncodeApgcode();
 
             auto outputIt = minPaths->find(outputApgcode);
-            if (outputIt != minPaths->end()) {
-              auto inputIt = minPaths->find(inputApgcode);
-              if (inputIt == minPaths->end()) continue;
-              if (inputIt->second.cost + resultComp.Cost() >= outputIt->second.cost) continue;
-            }
+            if (outputIt == minPaths->end()) continue; // Ideally this wouldn't happen, but the torus wrap can cause problems for large outputs
+            auto inputIt = minPaths->find(inputApgcode);
+            if (inputIt == minPaths->end()) continue;
+            if (inputIt->second.cost + resultComp.Cost() >= outputIt->second.cost) continue;
           }
 
           // TODO: There should be a better way to do this
