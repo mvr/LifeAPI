@@ -6,10 +6,12 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
+#include <limits>
 
 #include "../Component.hpp"
 #include "../ComponentTemplate.hpp"
 #include "ComponentDatabase.hpp"
+#include "CLI11/include/CLI/CLI.hpp"
 
 class TransferSynthesis {
 public:
@@ -235,22 +237,6 @@ void TransferSynthesis::SynthesiseThings(
   }
 }
 
-void printUsage(const char* progName) {
-    std::cout << "Usage: " << progName << " [options] <transfer_path> <target_file> <output_file>" << std::endl;
-    std::cout << "O << std::endlptions:" << std::endl;
-    std::cout << "  -h, --help                      Show this help message" << std::endl;
-    std::cout << "  -v, --verbose                   Enable verbose output" << std::endl;
-    std::cout << "  -c, --chunk-size N              Process patterns in chunks of size N (default: 64)" << std::endl;
-    std::cout << "  --use-dijkstra <cost_path>      Use Dijkstra paths for optimization with cost directory or file" << std::endl;
-    std::cout << "A << std::endlrguments:" << std::endl;
-    std::cout << "  transfer_path                   Directory or file containing .sjk files for transfer templates" << std::endl;
-    std::cout << "  target_file                     File containing target apgcodes (one per line)" << std::endl;
-    std::cout << "  output_file                     Output file for synthesis results" << std::endl;
-    std::cout << "E << std::endlxample:" << std::endl;
-    std::cout << "  " << progName << " Shinjuku/shinjuku/comp targets.txt output.sjk" << std::endl;
-    std::cout << "  " << progName << " --use-dijkstra Shinjuku/shinjuku/comp transfer_comp targets.txt output.sjk" << std::endl;
-    std::cout << "  " << progName << " --use-dijkstra single_cost.sjk single_transfer.sjk targets.txt output.sjk" << std::endl;
-}
 
 std::vector<std::string> readTargetFile(const std::string& filename) {
     std::vector<std::string> targets;
@@ -280,61 +266,129 @@ std::vector<std::string> readTargetFile(const std::string& filename) {
     return targets;
 }
 
-int main(int argc, char* argv[]) {
-    std::string transferPath;
-    std::string targetFile;
-    std::string outputFile;
-    std::string costPath;
-    bool verbose = false;
-    bool useDijkstra = false;
-    int chunkSize = 64;
+std::vector<std::string> getMostExpensiveTargets(const ComponentDatabase& db, int countPerClass, int maxPopulation, bool verbose) {
+    // Group patterns by population, tracking their minimum cost
+    std::unordered_map<int, std::vector<std::pair<unsigned, std::string>>> byPopulation;
     
-    // Parse command line arguments
-    for (int i = 1; i < argc; i++) {
-        std::string arg = argv[i];
+    for (const auto& [apgcode, components] : db.db) {
+        if (apgcode.empty() || apgcode.substr(0, 2) != "xs") continue;
         
-        if (arg == "-h" || arg == "--help") {
-            printUsage(argv[0]);
-            return 0;
-        } else if (arg == "-v" || arg == "--verbose") {
-            verbose = true;
-        } else if (arg == "-c" || arg == "--chunk-size") {
-            if (i + 1 >= argc) {
-                std::cerr << "Error: --chunk-size requires a value" << std::endl;
-                return 1;
-            }
-            chunkSize = std::stoi(argv[++i]);
-        } else if (arg == "--use-dijkstra") {
-            if (i + 1 >= argc) {
-                std::cerr << "Error: --use-dijkstra requires a cost directory" << std::endl;
-                return 1;
-            }
-            useDijkstra = true;
-            costPath = argv[++i];
-        } else if (arg[0] == '-') {
-            std::cerr << "Error: Unknown option " << arg << std::endl;
-            printUsage(argv[0]);
-            return 1;
-        } else {
-            // Positional arguments
-            if (transferPath.empty()) {
-                transferPath = arg;
-            } else if (targetFile.empty()) {
-                targetFile = arg;
-            } else if (outputFile.empty()) {
-                outputFile = arg;
-            } else {
-                std::cerr << "Error: Too many arguments" << std::endl;
-                printUsage(argv[0]);
-                return 1;
-            }
+        // Extract population from apgcode (e.g., "xs19_..." -> 19)
+        size_t underscorePos = apgcode.find('_');
+        if (underscorePos == std::string::npos) continue;
+        
+        std::string populationStr = apgcode.substr(2, underscorePos - 2);
+        int population;
+        try {
+            population = std::stoi(populationStr);
+        } catch (const std::exception&) {
+            continue;
+        }
+        
+        // Skip populations above the maximum
+        if (population > maxPopulation) continue;
+        
+        // Find minimum cost for this apgcode
+        unsigned minCost = std::numeric_limits<unsigned>::max();
+        for (const auto& [cost, outputApgcode, componentLine] : components) {
+            minCost = std::min(minCost, cost);
+        }
+        
+        if (minCost != std::numeric_limits<unsigned>::max()) {
+            byPopulation[population].emplace_back(minCost, apgcode);
         }
     }
     
-    if (transferPath.empty() || targetFile.empty() || outputFile.empty()) {
-        std::cerr << "Error: Missing required arguments" << std::endl;
-        printUsage(argv[0]);
-        return 1;
+    std::vector<std::string> result;
+    
+    // For each population class, sort by cost (descending) and take top N
+    for (auto& [population, patterns] : byPopulation) {
+        if (verbose) {
+            std::cerr << "Population " << population << ": " << patterns.size() << " patterns" << std::endl;
+        }
+        
+        // Sort by cost (descending - most expensive first)
+        std::sort(patterns.begin(), patterns.end(), [](const auto& a, const auto& b) {
+            return a.first > b.first;
+        });
+        
+        // Take top countPerClass
+        int count = std::min(countPerClass, static_cast<int>(patterns.size()));
+        for (int i = 0; i < count; i++) {
+            result.push_back(patterns[i].second);
+        }
+        
+        if (verbose) {
+            std::cerr << "Selected " << count << " most expensive patterns from population " << population;
+            if (count > 0) {
+                std::cerr << " (costs " << patterns[count-1].first << " to " << patterns[0].first << ")";
+            }
+            std::cerr << std::endl;
+        }
+    }
+    
+    if (verbose) {
+        std::cerr << "Total selected: " << result.size() << " patterns (populations <= " << maxPopulation << ")" << std::endl;
+    }
+    
+    return result;
+}
+
+int main(int argc, char* argv[]) {
+    CLI::App app{"Transfer synthesis tool for Conway's Game of Life patterns"};
+    
+    // Basic arguments
+    std::string transferPath;
+    std::string outputFile;
+    
+    app.add_option("transfer_path", transferPath, "Directory or file containing .sjk files for transfer templates")
+        ->required();
+    app.add_option("output_file", outputFile, "Output file for synthesis results")
+        ->required();
+    
+    // Options
+    bool verbose = false;
+    app.add_flag("-v,--verbose", verbose, "Enable verbose output");
+    
+    int chunkSize = 64;
+    app.add_option("-c,--chunk-size", chunkSize, "Process patterns in chunks of size N")
+        ->default_val(64);
+    
+    // Dijkstra option
+    std::string costPath;
+    auto dijkstra_opt = app.add_option("--use-dijkstra", costPath, 
+        "Use Dijkstra paths for optimization with cost directory or file");
+    
+    // Mutually exclusive target selection
+    auto target_group = app.add_option_group("target_selection", "Target selection (exactly one required)");
+    
+    std::string targetFile;
+    target_group->add_option("--target-file", targetFile,
+        "File containing target apgcodes (one per line)");
+    
+    int expensiveCount = 1000;
+    auto expensive_opt = target_group->add_option("--most-expensive", expensiveCount,
+        "Target the N most expensive syntheses of each population class")
+        ->default_val(1000);
+    
+    // Population limit for most-expensive mode
+    int maxPopulation = 60;
+    app.add_option("--max-population", maxPopulation, 
+        "Maximum population to consider (only with --most-expensive)")
+        ->default_val(60)
+        ->needs(expensive_opt);
+    
+    // Make exactly one target selection required
+    target_group->require_option(1);
+    
+    // most-expensive requires dijkstra
+    expensive_opt->needs(dijkstra_opt);
+    
+    // Parse command line
+    try {
+        app.parse(argc, argv);
+    } catch (const CLI::ParseError &e) {
+        return app.exit(e);
     }
     
     try {
@@ -350,10 +404,30 @@ int main(int argc, char* argv[]) {
             std::cout << "Found " << transferComponentFiles.size() << " transfer component files" << std::endl;
         }
         
-        // Read target objects
-        std::vector<std::string> targets = readTargetFile(targetFile);
+        // Get target objects based on mode
+        std::vector<std::string> targets;
+        if (*expensive_opt) {
+            // Load cost database to find most expensive targets
+            if (verbose) {
+                std::cerr << "Loading cost database to find most expensive targets..." << std::endl;
+            }
+            
+            std::vector<std::string> costComponentFiles = GetSJKFiles(costPath);
+            if (costComponentFiles.empty()) {
+                std::cerr << "Error: No .sjk files found in cost path " << costPath << std::endl;
+                return 1;
+            }
+            
+            ComponentDatabase costDb;
+            costDb.LoadFromFiles(costComponentFiles, verbose);
+            targets = getMostExpensiveTargets(costDb, expensiveCount, maxPopulation, verbose);
+        } else {
+            // Read targets from file
+            targets = readTargetFile(targetFile);
+        }
+        
         if (targets.empty()) {
-            std::cerr << "Error: No targets found in " << targetFile << std::endl;
+            std::cerr << "Error: No targets found" << std::endl;
             return 1;
         }
         
@@ -363,7 +437,7 @@ int main(int argc, char* argv[]) {
         
         // Run Dijkstra if requested
         std::unique_ptr<std::unordered_map<std::string, SearchResult>> minPaths;
-        if (useDijkstra) {
+        if (*dijkstra_opt) {
             if (verbose) {
                 std::cerr << "Running Dijkstra's algorithm on " << costPath << "..." << std::endl;
             }
