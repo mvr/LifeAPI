@@ -427,12 +427,16 @@ struct __attribute__((aligned(64))) LifeState {
 
   LifeState MatchLive(const LifeState &live) const {
     LifeState invThis = ~*this;
-    return ~invThis.Convolve(live.Mirrored());
+    return ~live.Mirrored().Convolve(invThis);
   }
 
   LifeState MatchLiveAndDead(const LifeState &live, const LifeState &dead) const {
     LifeState invThis = ~*this;
-    return ~invThis.Convolve(live.Mirrored()) & ~Convolve(dead.Mirrored());
+    LifeState liveMatches = ~live.Mirrored().Convolve(invThis);
+
+    if (liveMatches.IsEmpty())
+      return LifeState();
+    return liveMatches & ~Convolve(dead.Mirrored());
   }
 
   LifeState MatchesLiveAndDeadSym(const LifeState &live,
