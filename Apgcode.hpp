@@ -16,24 +16,24 @@ namespace Apgcode {
       return 'a' + (index - 10);
     }
     
-    static std::string EncodeWechsler(const LifeState& pattern);
-    static std::string EncodeRuns(const std::vector<uint8_t>& strip);
-    static std::vector<uint8_t> PatternToStrip(const LifeState& pattern, int minX, int maxX, int minY, int maxY);
-    static std::string FindCanonical(const LifeState& pattern);
+    static inline std::string EncodeWechsler(const LifeState& pattern);
+    static inline std::string EncodeRuns(const std::vector<uint8_t>& strip);
+    static inline std::vector<uint8_t> PatternToStrip(const LifeState& pattern, int minX, int maxX, int minY, int maxY);
+    static inline std::string FindCanonical(const LifeState& pattern);
     
   public:
-    static std::string EncodeStillLife(const LifeState& pattern);
-    static std::string EncodeOscillator(const LifeState& pattern, unsigned period);
+    static inline std::string EncodeStillLife(const LifeState& pattern);
+    static inline std::string EncodeOscillator(const LifeState& pattern, unsigned period);
   };
 
   class Decoder {
   private:
-    static std::vector<std::vector<uint8_t>> DecodeWechsler(const std::string& suffix);
-    static LifeState StripsToPattern(const std::vector<std::vector<uint8_t>>& strips);
+    static inline std::vector<std::vector<uint8_t>> DecodeWechsler(const std::string& suffix);
+    static inline LifeState StripsToPattern(const std::vector<std::vector<uint8_t>>& strips);
     
   public:
-    static LifeState Decode(const std::string& apgcode);
-    static bool IsValidApgcode(const std::string& apgcode);
+    static inline LifeState Decode(const std::string& apgcode);
+    static inline bool IsValidApgcode(const std::string& apgcode);
   };
 
 

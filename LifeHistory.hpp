@@ -21,7 +21,7 @@ struct LifeHistory {
       : state{state}, history{history}, marked{LifeState()},
         original{LifeState()} {};
 
-  std::string RLE() const;
+  inline std::string RLE() const;
   std::string RLEWHeader() const {
     return "x = 0, y = 0, rule = LifeHistory\n" + RLE();
   }
@@ -41,8 +41,8 @@ struct LifeHistory {
     }
   }
 
-  static LifeHistory Parse(const std::string &s);
-  static LifeHistory ParseBellman(const std::string &s);
+  static inline LifeHistory Parse(const std::string &s);
+  static inline LifeHistory ParseBellman(const std::string &s);
 
   void Move(int x, int y) {
     state.Move(x, y);
