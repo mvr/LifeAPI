@@ -43,12 +43,9 @@ namespace Apgcode {
   };
 
   std::string Encoder::EncodeWechsler(const LifeState& pattern) {
-    auto bounds = pattern.XYBounds();
-    if (bounds[0] == -1) return "";
-    
-    int minX = bounds[0], maxX = bounds[2];
-    int minY = bounds[1], maxY = bounds[3];
-    
+    if (pattern.IsEmpty()) return "";
+
+    auto [minX, minY, maxX, maxY] = pattern.XYBounds();
     std::vector<std::string> strips;
     
     for (int startY = minY; startY <= maxY; startY += 5) {
