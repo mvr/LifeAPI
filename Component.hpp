@@ -28,6 +28,7 @@ public:
   LifeState Realise() const;
 
   GliderSet Stepped(int n) const;
+  GliderSet Rewind(int generations) const;
 
   GliderSet Transformed(SymmetryTransform t) const;
   GliderSet Moved(std::pair<int, int> p) const;
@@ -67,6 +68,29 @@ LifeState GliderSet::Realise() const {
 
 GliderSet GliderSet::Stepped(int n) const {
   return GliderSet(se.Stepped(n), sw.Stepped(n), nw.Stepped(n), ne.Stepped(n));
+}
+
+GliderSet GliderSet::Rewind(int n) const {
+  int offset = (n + 3) / 4;  // ceil(generations/4)
+  
+  int forwardStep = 0;
+  if (n % 4 != 0) {
+    forwardStep = 4 - (n % 4);
+  }
+  
+  LifeState rewoundSE = se.Moved(-offset, -offset);
+  LifeState rewoundSW = sw.Moved(offset, -offset);
+  LifeState rewoundNW = nw.Moved(offset, offset);
+  LifeState rewoundNE = ne.Moved(-offset, offset);
+  
+  if (forwardStep > 0) {
+    rewoundSE = rewoundSE.Stepped(forwardStep);
+    rewoundSW = rewoundSW.Stepped(forwardStep);
+    rewoundNW = rewoundNW.Stepped(forwardStep);
+    rewoundNE = rewoundNE.Stepped(forwardStep);
+  }
+  
+  return GliderSet(rewoundSE, rewoundSW, rewoundNW, rewoundNE);
 }
 
 GliderSet GliderSet::Transformed(SymmetryTransform t) const {
