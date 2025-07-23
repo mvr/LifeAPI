@@ -3,7 +3,7 @@
 #include "../LifeAPI.hpp"
 #include "../Parsing.hpp"
 
-TEST(StableComponentsTest, Basics) {
+TEST(StillComponentsTest, Basics) {
   std::vector<std::pair<std::string, unsigned>> tests = {
       {"2o$2o!", 1},
       {"2ob2o$2ob2o!", 1},
@@ -15,7 +15,7 @@ TEST(StableComponentsTest, Basics) {
 
   for (auto &[ rle, expected ] : tests) {
     LifeState pat = LifeState::Parse(rle);
-    unsigned count = pat.StableComponents().size();
+    unsigned count = pat.StillComponents().size();
     EXPECT_EQ(count, expected) << "failed for " << rle;
   }
 }
