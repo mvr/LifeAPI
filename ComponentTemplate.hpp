@@ -20,6 +20,8 @@ struct ComponentTemplate {
   ComponentTemplate Moved(std::pair<int, int> p) const;
 
   void NormalisePosition();
+  // Try to shift glider set to fit in 64x64 torus without wrapping
+  void ShiftToFitTorus();
 
   uint64_t GetHash() const;
 
@@ -107,6 +109,11 @@ void ComponentTemplate::NormalisePosition() {
     bounds = out.XYBounds();
 
   *this = Moved({-bounds[0], -bounds[1]});
+}
+
+void ComponentTemplate::ShiftToFitTorus() {
+  auto offset = gliderSet.OffsetToFitTorus();
+  *this = Moved(offset);
 }
 
 uint64_t ComponentTemplate::GetHash() const {

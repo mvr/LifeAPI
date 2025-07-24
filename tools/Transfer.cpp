@@ -153,6 +153,7 @@ void TransferSynthesis::ApplyTemplates(
           if (!resultComp.SanityCheck())
             continue;
 
+          resultComp.ShiftToFitTorus();
           std::cout << resultComp.Realise() << std::endl;
 
         } catch (const std::exception&) {

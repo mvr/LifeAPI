@@ -32,6 +32,8 @@ public:
 
   GliderSet Transformed(SymmetryTransform t) const;
   GliderSet Moved(std::pair<int, int> p) const;
+  // Try to shift glider set to fit in 64x64 torus without wrapping
+  inline std::pair<int, int> OffsetToFitTorus() const;
 
   static GliderSet FromSJK(const std::string& gliderData, unsigned rewind = 4);
   std::string ToSJK() const;
@@ -46,6 +48,7 @@ struct Component {
   bool SanityCheck() const;
 
   LifeState Realise() const;
+  inline void ShiftToFitTorus();
 
   static Component FromSJK(const std::string& compStr);
   std::string ToSJK() const;
@@ -132,6 +135,34 @@ GliderSet GliderSet::Moved(std::pair<int, int> p) const {
   return {
     se.Moved(p), sw.Moved(p), nw.Moved(p), ne.Moved(p),
   };
+}
+
+
+std::pair<int, int> GliderSet::OffsetToFitTorus() const {
+  const int DANGER_ZONE = 16;
+
+  LifeState southWrapped = (se | sw) & LifeState::SolidRect(-32, 32 - DANGER_ZONE, 64, DANGER_ZONE);
+  LifeState northWrapped = (nw | ne) & LifeState::SolidRect(-32, -32, 64, DANGER_ZONE);
+  LifeState eastWrapped = (se | ne) & LifeState::SolidRect(32 - DANGER_ZONE, -32, DANGER_ZONE, 64);
+  LifeState westWrapped = (sw | nw) & LifeState::SolidRect(-32, -32, DANGER_ZONE, 64);
+
+  bool southProblematic = !southWrapped.IsEmpty();
+  bool northProblematic = !northWrapped.IsEmpty();
+  bool eastProblematic = !eastWrapped.IsEmpty();
+  bool westProblematic = !westWrapped.IsEmpty();
+
+  int shiftX = 0;
+  int shiftY = 0;
+  if (eastProblematic && !westProblematic)
+    shiftX = DANGER_ZONE;
+  if (!eastProblematic && westProblematic)
+    shiftX = -DANGER_ZONE;
+  if (southProblematic && !northProblematic)
+    shiftY = DANGER_ZONE;
+  if (!southProblematic && northProblematic)
+    shiftY = -DANGER_ZONE;
+
+  return {shiftX, shiftY};
 }
 
 GliderSet GliderSet::FromSJK(const std::string& gliderData, unsigned rewind) {
@@ -263,6 +294,19 @@ bool Component::SanityCheck() const {
   // TODO: Torus wrap?
 
   return true;
+}
+
+Component Component::Moved(std::pair<int, int> p) const {
+  return {
+    base.Moved(p),
+    gliderSet.Moved(p),
+    out.Moved(p),
+  };
+}
+
+void Component::ShiftToFitTorus() {
+  auto offset = gliderSet.OffsetToFitTorus();
+  *this = Moved(offset);
 }
 
 std::tuple<std::string, std::string, std::string> Component::SplitSJKLine(const std::string& compStr) {
