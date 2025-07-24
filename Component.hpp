@@ -20,23 +20,23 @@ public:
   LifeState ne;
     
   GliderSet() = default;
-  GliderSet(const LifeState& se, const LifeState& sw, const LifeState& nw, const LifeState& ne);
+  inline GliderSet(const LifeState& se, const LifeState& sw, const LifeState& nw, const LifeState& ne);
 
   // TODO: It is dumb to be recomputing this each time
   unsigned Cost() const { return (se.GetPop() + sw.GetPop() + nw.GetPop() + ne.GetPop())/5; }
 
-  LifeState Realise() const;
+  inline LifeState Realise() const;
 
-  GliderSet Stepped(int n) const;
-  GliderSet Rewind(int generations) const;
+  inline GliderSet Stepped(int n) const;
+  inline GliderSet Rewind(int generations) const;
 
-  GliderSet Transformed(SymmetryTransform t) const;
-  GliderSet Moved(std::pair<int, int> p) const;
+  inline GliderSet Transformed(SymmetryTransform t) const;
+  inline GliderSet Moved(std::pair<int, int> p) const;
   // Try to shift glider set to fit in 64x64 torus without wrapping
   inline std::pair<int, int> OffsetToFitTorus() const;
 
-  static GliderSet FromSJK(const std::string& gliderData, unsigned rewind = 4);
-  std::string ToSJK() const;
+  static inline GliderSet FromSJK(const std::string& gliderData, unsigned rewind = 4);
+  inline std::string ToSJK() const;
 };
 
 struct Component {
@@ -44,21 +44,24 @@ struct Component {
   GliderSet gliderSet;
   LifeState out;
 
-  unsigned Cost() const { return gliderSet.Cost(); }
-  bool SanityCheck() const;
+  inline unsigned Cost() const { return gliderSet.Cost(); }
+  inline bool SanityCheck() const;
 
-  LifeState Realise() const;
+  inline Component Moved(std::pair<int, int> p) const;
   inline void ShiftToFitTorus();
 
-  static Component FromSJK(const std::string& compStr);
-  std::string ToSJK() const;
-  std::string RLE() const;
+  inline LifeState Realise() const;
 
-  static std::tuple<std::string, std::string, std::string> SplitSJKLine(const std::string& compStr);
-  static std::tuple<std::string, unsigned, std::string> SplitSJKLineCost(const std::string& compStr);
-  static std::pair<std::string, int> ParseApgcodeWithPhase(const std::string& inData);
 
-  static LifeState BaseGlider(int steps);
+  inline static Component FromSJK(const std::string& compStr);
+  inline std::string ToSJK() const;
+  inline std::string RLE() const;
+
+  inline static std::tuple<std::string, std::string, std::string> SplitSJKLine(const std::string& compStr);
+  inline static std::tuple<std::string, unsigned, std::string> SplitSJKLineCost(const std::string& compStr);
+  inline static std::pair<std::string, int> ParseApgcodeWithPhase(const std::string& inData);
+
+  inline static LifeState BaseGlider(int steps);
 };
 
 
