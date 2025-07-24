@@ -152,48 +152,8 @@ std::unordered_set<std::string> TransferSynthesis::ApplyTemplates(
             if (inputIt->second.cost + resultComp.Cost() >= outputIt->second.cost) continue;
           }
 
-          // TODO: There should be a better way to do this
-          if (resultComp.Realise().Stepped(200) != resultComp.out)
+          if (!resultComp.SanityCheck())
             continue;
-
-          // Rewind in steps of 16 until all salvos are outside the base pattern bounding box
-          auto [minX, minY, maxX, maxY] = resultComp.base.XYBounds();
-          
-          GliderSet rewoundGliders = resultComp.gliderSet;
-          int totalRewind = 0;
-          const int rewindStep = 16;
-          const int maxRewindSteps = 20; // Safety limit
-          
-          for (int step = 0; step < maxRewindSteps; step++) {
-            rewoundGliders = rewoundGliders.Rewind(rewindStep);
-            totalRewind += rewindStep;
-            
-            // Check that each individual salvo is outside the base pattern bounding box
-            bool allSalvosOutside = true;
-            
-            for (const LifeState& salvo : {rewoundGliders.se, rewoundGliders.sw, rewoundGliders.nw, rewoundGliders.ne}) {
-              if (!salvo.IsEmpty()) {
-                auto [sMinX, sMinY, sMaxX, sMaxY] = salvo.XYBounds();
-                if (!(sMaxX < minX || sMinX > maxX || sMaxY < minY || sMinY > maxY)) {
-                  allSalvosOutside = false;
-                  break;
-                }
-              }
-            }
-            
-            if (allSalvosOutside) {
-              break;
-            }
-          }
-          
-          Component rewoundComp;
-          rewoundComp.base = resultComp.base;
-          rewoundComp.gliderSet = rewoundGliders;
-          rewoundComp.out = resultComp.out;
-            
-          if (rewoundComp.Realise().Stepped(totalRewind) != resultComp.Realise())
-            continue;
-
 
           std::string compStr = resultComp.ToSJK();
           // std::cerr << templ.RLE() << std::endl;

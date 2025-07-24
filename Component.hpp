@@ -43,6 +43,7 @@ struct Component {
   LifeState out;
 
   unsigned Cost() const { return gliderSet.Cost(); }
+  bool SanityCheck() const;
 
   LifeState Realise() const;
 
@@ -212,6 +213,58 @@ GliderSet GliderSet::FromSJK(const std::string& gliderData, unsigned rewind) {
   return result.Transformed(orientation).Moved({shiftX, shiftY});
 }
 
+LifeState Component::Realise() const {
+  return base | gliderSet.Realise();
+}
+
+// TODO: This could be better
+bool Component::SanityCheck() const {
+  if (Realise().Stepped(200) != out)
+    return false;
+
+  // Rewind in steps of 16 until all salvos are outside the base pattern bounding box
+  auto [minX, minY, maxX, maxY] = base.XYBounds();
+
+  GliderSet rewoundGliders = gliderSet;
+  int totalRewind = 0;
+  const int rewindStep = 16;
+  const int maxRewindSteps = 20; // Safety limit
+
+  for (int step = 0; step < maxRewindSteps; step++) {
+    rewoundGliders = rewoundGliders.Rewind(rewindStep);
+    totalRewind += rewindStep;
+
+    // Check that each individual salvo is outside the base pattern bounding box
+    bool allSalvosOutside = true;
+
+    for (const LifeState& salvo : {rewoundGliders.se, rewoundGliders.sw, rewoundGliders.nw, rewoundGliders.ne}) {
+      if (!salvo.IsEmpty()) {
+        auto [sMinX, sMinY, sMaxX, sMaxY] = salvo.XYBounds();
+        if (!(sMaxX < minX || sMinX > maxX || sMaxY < minY || sMinY > maxY)) {
+          allSalvosOutside = false;
+          break;
+        }
+      }
+    }
+
+    if (allSalvosOutside) {
+      break;
+    }
+  }
+
+  Component rewoundComp;
+  rewoundComp.base = base;
+  rewoundComp.gliderSet = rewoundGliders;
+  rewoundComp.out = out;
+
+  if (rewoundComp.Realise().Stepped(totalRewind) != Realise())
+    return false;
+
+  // TODO: Torus wrap?
+
+  return true;
+}
+
 std::tuple<std::string, std::string, std::string> Component::SplitSJKLine(const std::string& compStr) {
   size_t firstPos = compStr.find('>');
   size_t secondPos = compStr.find('>', firstPos + 1);
@@ -295,10 +348,6 @@ LifeState Component::BaseGlider(int steps) {
   };
 
   return gliderPhases[steps & 0b11].Moved(steps >> 2, steps >> 2);
-}
-
-LifeState Component::Realise() const {
-  return base | gliderSet.Realise();
 }
 
 Component Component::FromSJK(const std::string& compStr) {
