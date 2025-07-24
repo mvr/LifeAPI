@@ -20,14 +20,14 @@ public:
                          bool verbose = false);
 
 
-  static std::unordered_set<std::string> ApplyTemplates(
+  static void ApplyTemplates(
       const std::vector<LifeState> &patterns,
       const std::vector<ComponentTemplate> &templates,
       const std::unordered_map<std::string, SearchResult> *minPaths = nullptr);
 
   static void SynthesiseThings(
       const std::vector<std::string> &transferComponentFiles,
-      const std::vector<std::string> &objects, const std::string &outfile,
+      const std::vector<std::string> &objects,
       int chunkSize = 64,
       const std::unordered_map<std::string, SearchResult> *minPaths = nullptr);
 };
@@ -118,12 +118,10 @@ std::vector<ComponentTemplate> TransferSynthesis::LoadComponentTemplates(
   return result;
 }
 
-std::unordered_set<std::string> TransferSynthesis::ApplyTemplates(
+void TransferSynthesis::ApplyTemplates(
     const std::vector<LifeState> &patterns,
     const std::vector<ComponentTemplate> &templates,
     const std::unordered_map<std::string, SearchResult> *minPaths) {
-
-  std::unordered_set<std::string> solutions;
 
   for (const LifeState &pattern : patterns) {
     // std::cout << "Pattern " << pattern << std::endl;
@@ -155,29 +153,7 @@ std::unordered_set<std::string> TransferSynthesis::ApplyTemplates(
           if (!resultComp.SanityCheck())
             continue;
 
-          std::string compStr = resultComp.ToSJK();
-          // std::cerr << templ.RLE() << std::endl;
-          // std::cerr << templ.GetHash() << std::endl;
-          // {
-          //   // Calculate hash for all orientations and use the minimum
-          //   ComponentTemplate canonicalTempl;
-
-          //   using enum SymmetryTransform;
-          //   for (auto transform :
-          //          {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY,
-          //           ReflectAcrossYeqNegXP1, Rotate90, Rotate270, Rotate180OddBoth}) {
-          //     ComponentTemplate transformedTempl = templ.Transformed(transform);
-          //     transformedTempl.NormalisePosition();
-          //     std::cerr << transformedTempl.RLE() << std::endl;
-          //     std::cerr << transformedTempl.count.bit0 << std::endl;
-          //     std::cerr << transformedTempl.count.bit1 << std::endl;
-          //     std::cerr << transformedTempl.count.bit2 << std::endl;
-          //     std::cerr << transformedTempl.GetHash() << std::endl;
-          //   }
-          // }
-          // std::cerr << resultComp.Realise() << std::endl;
           std::cout << resultComp.Realise() << std::endl;
-          solutions.insert(compStr);
 
         } catch (const std::exception&) {
           continue;
@@ -185,13 +161,11 @@ std::unordered_set<std::string> TransferSynthesis::ApplyTemplates(
       }
     }
   }
-
-  return solutions;
 }
 
 void TransferSynthesis::SynthesiseThings(
     const std::vector<std::string> &transferComponentFiles,
-    const std::vector<std::string> &objects, const std::string &outfile,
+    const std::vector<std::string> &objects,
     int chunkSize,
     const std::unordered_map<std::string, SearchResult> *minPaths) {
 
@@ -215,17 +189,11 @@ void TransferSynthesis::SynthesiseThings(
 
   std::cerr << "Processing " << allPatterns.size() << " patterns" << std::endl;
 
-  std::ofstream outStream(outfile);
-
   for (size_t i = 0; i < allPatterns.size(); i += chunkSize) {
     size_t j = std::min(i + chunkSize, allPatterns.size());
 
     std::vector<LifeState> chunk(allPatterns.begin() + i, allPatterns.begin() + j);
-    auto solutions = ApplyTemplates(chunk, templates, minPaths);
-
-    for (const auto& solution : solutions) {
-      outStream << solution << std::endl;
-    }
+    ApplyTemplates(chunk, templates, minPaths);
 
     std::cerr << "" << j << " patterns complete" << std::endl;
   }
@@ -333,13 +301,10 @@ int main(int argc, char* argv[]) {
     
     // Basic arguments
     std::string transferPath;
-    std::string outputFile;
-    
+
     app.add_option("transfer_path", transferPath, "Directory or file containing .sjk files for transfer templates")
         ->required();
-    app.add_option("output_file", outputFile, "Output file for synthesis results")
-        ->required();
-    
+
     // Options
     bool verbose = false;
     app.add_flag("-v,--verbose", verbose, "Enable verbose output");
@@ -460,14 +425,10 @@ int main(int argc, char* argv[]) {
         TransferSynthesis::SynthesiseThings(
             transferComponentFiles, 
             targets, 
-            outputFile, 
-            chunkSize, 
+            chunkSize,
             minPaths.get()
         );
 
-        if (verbose)
-          std::cerr << "Results written to " << outputFile << std::endl;
-        
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
