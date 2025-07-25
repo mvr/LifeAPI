@@ -691,6 +691,51 @@ struct __attribute__((aligned(64))) LifeState {
     return cs;
   }
 
+private:
+  bool IsPseudoStillLifeHelper(const std::vector<LifeState>& components, bool topLevel) const {
+    if (components.empty()) return true;
+
+    if (!topLevel) {
+      LifeState combined;
+      for (auto &c : components) {
+        combined |= c;
+      }
+      if (combined == combined.Stepped())
+        return true;
+    }
+    
+    // Try all non-empty proper subsets (2^n - 2 possibilities)
+    int n = components.size();
+    for (int mask = 1; mask < (1 << n) - 1; mask++) {
+      LifeState group1, group2;
+      std::vector<LifeState> group1Components, group2Components;
+      
+      // Split components based on mask
+      for (int i = 0; i < n; i++) {
+        if (mask & (1 << i)) {
+          group1 |= components[i];
+          group1Components.push_back(components[i]);
+        } else {
+          group2 |= components[i];
+          group2Components.push_back(components[i]);
+        }
+      }
+      
+      if (IsPseudoStillLifeHelper(group1Components, false) &&
+          IsPseudoStillLifeHelper(group2Components, false)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+public:
+  bool IsPseudoStillLife() const {
+    auto components = Components(LifeState::ConstantParse("3o$3o$3o!", -1, -1));
+    return IsPseudoStillLifeHelper(components, true);
+  }
+
   ////////////////////////////////
   // Transforms
   ////////////////////////////////
