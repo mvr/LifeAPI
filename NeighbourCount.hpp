@@ -24,6 +24,15 @@ struct NeighbourCount {
     return result;
   }
 
+  LifeState Difference(const NeighbourCount &other) const {
+    LifeState result;
+    result |= bit3 ^ other.bit3;
+    result |= bit2 ^ other.bit2;
+    result |= bit1 ^ other.bit1;
+    result |= bit0 ^ other.bit0;
+    return result;
+  }
+
   NeighbourCount Transformed(SymmetryTransform t) const {
     return {bit3.Transformed(t), bit2.Transformed(t), bit1.Transformed(t),
             bit0.Transformed(t)};

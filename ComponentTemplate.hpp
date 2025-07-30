@@ -33,6 +33,9 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
   LifeState state = component.Realise();
   LifeState everActive;
 
+  NeighbourCount startCount(state);
+  LifeState everDifferentNeighbours;
+
   unsigned gen = 0;
 
   bool done = false;
@@ -40,6 +43,7 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
     LifeState prev = state;
 
     everActive |= state ^ component.base;
+    everDifferentNeighbours |= NeighbourCount(state).Difference(startCount);
 
     state.Step();
     gen++;
@@ -49,7 +53,7 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
       throw std::runtime_error("Component took too long");
   }
 
-  LifeState relevant = everActive.ZOI();
+  LifeState relevant = everActive.ZOI() & everDifferentNeighbours;
 
   NeighbourCount count(state);
   count.bit0 &= relevant;
@@ -58,7 +62,7 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
   count.bit3 &= relevant;
 
   return {component.base & relevant,
-          ~component.base & ~component.out & relevant,
+          ~component.base & ~component.out & everActive.ZOI(),
           count,
           component.gliderSet,
           component.out & relevant};
