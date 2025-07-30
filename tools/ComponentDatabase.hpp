@@ -32,7 +32,7 @@ public:
   void LoadFromFile(const std::string& filePath, bool verbose = false);
   std::unordered_map<std::string, SearchResult> Dijkstra(const std::string& seed = "") const;
   
-  std::vector<ComponentTemplate> LoadComponentTemplates(bool verbose = false) const;
+  std::vector<ComponentTemplate> LoadComponentTemplates(bool verbose = false, unsigned minOccurrences = 1) const;
   
   // Filter function to determine if a component is useful for synthesis
   static bool IsUsefulComponent(const Component& comp);
@@ -114,12 +114,12 @@ std::unordered_map<std::string, SearchResult> ComponentDatabase::Dijkstra(const 
   return result;
 }
 
-std::vector<ComponentTemplate> ComponentDatabase::LoadComponentTemplates(bool verbose) const {
+std::vector<ComponentTemplate> ComponentDatabase::LoadComponentTemplates(bool verbose, unsigned minOccurrences) const {
   if(verbose)
     std::cerr << "Extracting templates from components" << std::endl;
   unsigned total_components = 0;
 
-  std::unordered_map<uint64_t, std::pair<ComponentTemplate, unsigned>> uniqueTemplates;
+  std::unordered_map<uint64_t, std::tuple<ComponentTemplate, unsigned, unsigned>> uniqueTemplates; // template, cost, count
 
   for (const auto &[inputApgcode, components] : db) {
     if (inputApgcode == "") continue;
@@ -158,9 +158,17 @@ std::vector<ComponentTemplate> ComponentDatabase::LoadComponentTemplates(bool ve
         
         auto it = uniqueTemplates.find(minHash);
         
-        // Only add/replace if this is a lower cost template
-        if (it == uniqueTemplates.end() || cost < it->second.second) {
-          uniqueTemplates[minHash] = std::make_pair(canonicalTempl, cost);
+        if (it == uniqueTemplates.end()) {
+          // First occurrence of this template
+          uniqueTemplates[minHash] = std::make_tuple(canonicalTempl, cost, 1);
+        } else {
+          // Template already exists, increment count and update cost if lower
+          auto& [existingTempl, existingCost, count] = it->second;
+          count++;
+          if (cost < existingCost) {
+            existingTempl = canonicalTempl;
+            existingCost = cost;
+          }
         }
       } catch (const std::exception&) {
         // Skip invalid components
@@ -171,11 +179,15 @@ std::vector<ComponentTemplate> ComponentDatabase::LoadComponentTemplates(bool ve
     }
   }
 
-  // Convert to vector
+  // Convert to vector, only including templates that occurred at least minOccurrences times
   std::vector<ComponentTemplate> result;
-  result.reserve(uniqueTemplates.size());
-  for (const auto& [hash, templatePair] : uniqueTemplates) {
-    result.push_back(templatePair.first);
+  unsigned templatesBeforeFiltering = uniqueTemplates.size();
+  
+  for (const auto& [hash, templateTuple] : uniqueTemplates) {
+    const auto& [templ, cost, count] = templateTuple;
+    if (count >= minOccurrences) {
+      result.push_back(templ);
+    }
   }
   
   // Sort templates by population (smallest first), then by base hash, then by out hash
@@ -201,7 +213,12 @@ std::vector<ComponentTemplate> ComponentDatabase::LoadComponentTemplates(bool ve
 
   if (verbose) {
     std::cerr << "Loaded " << total_components << " total components" << std::endl;
-    std::cerr << "Loaded " << result.size() << " templates" << std::endl;
+    std::cerr << "Found " << templatesBeforeFiltering << " unique templates" << std::endl;
+    if (minOccurrences > 1) {
+      std::cerr << "Filtered to " << result.size() << " templates (occurring ≥" << minOccurrences << " times)" << std::endl;
+    } else {
+      std::cerr << "Loaded " << result.size() << " templates" << std::endl;
+    }
   }
 
   return result;

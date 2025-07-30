@@ -54,7 +54,8 @@ public:
       int maxDepth = 1,
       int maxPrecursorPop = 30,
       bool skipExisting = false,
-      bool acceptFirst = false);
+      bool acceptFirst = false,
+      unsigned minTemplateOccurrences = 1);
 };
 
 std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesisSteps(
@@ -193,12 +194,13 @@ void TransferSynthesis::RunSynthesis(
     int maxDepth,
     int maxPrecursorPop,
     bool skipExisting,
-    bool acceptFirst) {
+    bool acceptFirst,
+    unsigned minTemplateOccurrences) {
 
   // Load component templates
   ComponentDatabase db;
   db.LoadFromFiles(transferComponentFiles, true);
-  std::vector<ComponentTemplate> templates = db.LoadComponentTemplates(true);
+  std::vector<ComponentTemplate> templates = db.LoadComponentTemplates(true, minTemplateOccurrences);
 
   // Filter target objects
   std::vector<std::string> filteredObjects = FilterTargetObjects(objects, minPaths, skipExisting);
@@ -540,6 +542,10 @@ int main(int argc, char* argv[]) {
     app.add_option("--max-precursor-pop", maxPrecursorPop, "Maximum population of precursor patterns")
         ->default_val(30);
     
+    unsigned minTemplateOccurrences = 1;
+    app.add_option("--min-template-occurrences", minTemplateOccurrences, "Minimum times a template must occur to be used")
+        ->default_val(1);
+    
     // Mutually exclusive target selection
     auto target_group = app.add_option_group("target_selection", "Target selection (exactly one required)");
     
@@ -666,7 +672,8 @@ int main(int argc, char* argv[]) {
             maxDepth,
             maxPrecursorPop,
             skipExisting,
-            acceptFirst
+            acceptFirst,
+            minTemplateOccurrences
         );
 
     } catch (const std::exception& e) {
