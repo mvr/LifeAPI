@@ -419,7 +419,7 @@ Component Component::FromSJK(const std::string& compStr) {
   if (phase > 0) {
     result.base = result.base.Stepped(phase);
   }
-  result.gliderSet = GliderSet::FromSJK(gliderData);
+  result.gliderSet = GliderSet::FromSJK(gliderData, 2);
 
   // We can't use the provided Apgcode for the output because we don't
   // know what orientation and offset to place it at, so we just have
