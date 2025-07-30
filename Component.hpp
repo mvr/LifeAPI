@@ -313,6 +313,13 @@ Component Component::Moved(std::pair<int, int> p) const {
 }
 
 void Component::ShiftToFitTorus() {
+  std::array<int, 4> bounds = base.XYBounds();
+
+  if (base.IsEmpty())
+    bounds = out.XYBounds();
+
+  *this = Moved({-bounds[0], -bounds[1]});
+
   auto offset = gliderSet.OffsetToFitTorus();
   *this = Moved(offset);
 }
