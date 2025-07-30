@@ -31,10 +31,11 @@ public:
 
   // Find all possible synthesis steps for a given pattern
   static std::vector<SynthesisResult> FindSynthesisSteps(
-      const LifeState& targetPattern,
-      const std::vector<ComponentTemplate>& templates,
-      const std::unordered_map<std::string, SearchResult>& minPaths,
-      int maxPrecursorPop = std::numeric_limits<int>::max());
+      const LifeState &targetPattern,
+      const std::vector<ComponentTemplate> &templates,
+      const std::unordered_map<std::string, SearchResult> &minPaths,
+      int maxPrecursorPop = std::numeric_limits<int>::max(),
+      bool onlyImprovements = true);
 
   // Filter target objects, optionally skipping those with existing synthesis paths
   static std::vector<std::string> FilterTargetObjects(
@@ -60,8 +61,9 @@ std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesis
     const LifeState& targetPattern,
     const std::vector<ComponentTemplate>& templates,
     const std::unordered_map<std::string, SearchResult>& minPaths,
-    int maxPrecursorPop) {
-  
+    int maxPrecursorPop,
+    bool onlyImprovements) {
+
   std::vector<SynthesisResult> results;
   std::string targetApgcode = targetPattern.EncodeApgcode();
   
@@ -85,13 +87,16 @@ std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesis
 
         std::string precursorApgcode = resultComp.base.EncodeApgcode();
 
-        auto outputIt = minPaths.find(targetApgcode);
-        bool newOutput = outputIt == minPaths.end();
-        // if (newOutput) continue;
+        if (onlyImprovements) {
+          auto outputIt = minPaths.find(targetApgcode);
+          bool newOutput = outputIt == minPaths.end();
+          // if (newOutput) continue;
 
-        auto inputIt = minPaths.find(precursorApgcode);
-        if (inputIt == minPaths.end()) continue;
-        if (!newOutput && inputIt->second.cost + resultComp.Cost() >= outputIt->second.cost) continue;
+          auto inputIt = minPaths.find(precursorApgcode);
+          if (inputIt == minPaths.end()) continue;
+          if (!newOutput && inputIt->second.cost + resultComp.Cost() >= outputIt->second.cost)
+            continue;
+        }
         
         results.emplace_back(resultComp, precursorApgcode, targetApgcode);
       } catch (const std::exception&) {
@@ -285,7 +290,7 @@ void TransferSynthesis::RunSynthesis(
           // If we're at the lowest depth, allow anything to be looked up in the database
           int popLimit = depth == maxDepth - 1 ? std::numeric_limits<unsigned>::max() : maxPrecursorPop;
 
-          auto syntheses = FindSynthesisSteps(pattern, templates, minPaths, popLimit);
+          auto syntheses = FindSynthesisSteps(pattern, templates, minPaths, popLimit, false);
 
           for (auto& synthesis : syntheses) {
             // Filter out unpromising synthesis results
