@@ -7,6 +7,8 @@
 #include <unordered_set>
 #include <algorithm>
 #include <limits>
+#include <functional>
+#include <queue>
 
 #include "../Component.hpp"
 #include "../ComponentTemplate.hpp"
@@ -15,10 +17,33 @@
 
 class TransferSynthesis {
 public:
-  static std::vector<ComponentTemplate>
-  LoadComponentTemplates(const std::vector<std::string> &filePaths,
-                         bool verbose = false);
+  // Structure to hold a synthesis result
+  struct SynthesisResult {
+    Component component;
+    std::string precursorApgcode;
+    std::string targetApgcode;
+    bool valid;
+    
+    SynthesisResult() : valid(false) {}
+    SynthesisResult(const Component& comp, const std::string& precursor, const std::string& target)
+      : component(comp), precursorApgcode(precursor), targetApgcode(target), valid(true) {}
+  };
 
+  // Find all possible synthesis steps for a given pattern
+  static std::vector<SynthesisResult> FindSynthesisSteps(
+      const LifeState& targetPattern,
+      const std::vector<ComponentTemplate>& templates,
+      const std::unordered_map<std::string, SearchResult>* minPaths = nullptr,
+      int maxPrecursorPop = std::numeric_limits<int>::max());
+
+  // Filter target objects, optionally skipping those with existing synthesis paths
+  static std::vector<std::string> FilterTargetObjects(
+      const std::vector<std::string>& objects,
+      const std::unordered_map<std::string, SearchResult>* minPaths = nullptr,
+      bool skipExisting = false);
+
+  // Check if a synthesis result is promising (filters out hopeless cases like distant blocks/tubs)
+  static bool IsPromising(const SynthesisResult& synthesis);
 
   static void ApplyTemplates(
       const std::vector<LifeState> &patterns,
@@ -29,93 +54,143 @@ public:
       const std::vector<std::string> &transferComponentFiles,
       const std::vector<std::string> &objects,
       int chunkSize = 64,
-      const std::unordered_map<std::string, SearchResult> *minPaths = nullptr);
+      const std::unordered_map<std::string, SearchResult> *minPaths = nullptr,
+      bool skipExisting = false);
+
+  static void DepthFirstSynthesis(
+      const std::vector<std::string> &transferComponentFiles,
+      const std::vector<std::string> &objects,
+      int maxDepth = 3,
+      int maxPrecursorPop = 30,
+      const std::unordered_map<std::string, SearchResult> *minPaths = nullptr,
+      bool skipExisting = false,
+      bool acceptFirst = false);
 };
 
-
-std::vector<ComponentTemplate> TransferSynthesis::LoadComponentTemplates(
-    const std::vector<std::string> &filePaths, bool verbose) {
-  ComponentDatabase db;
-  db.LoadFromFiles(filePaths, verbose);
-
-  if(verbose)
-    std::cerr << "Extracting templates from components" << std::endl;
-  unsigned total_components = 0;
-
-  std::unordered_map<uint64_t, std::pair<ComponentTemplate, unsigned>> uniqueTemplates;
-
-  for (const auto &[inputApgcode, components] : db.db) {
-    if (inputApgcode == "") continue;
-    if (inputApgcode.substr(0, 2) != "xs") continue;
-
-    // LifeState inputState = LifeState::DecodeApgcode(inputApgcode);
-    // if (inputState.StillComponents().size() > 1) {
-    //   if(verbose)
-    //     std::cerr << "Skipping components with disconnected input " << inputApgcode << std::endl;
-    //   continue;
-    // }
-
-    for (const auto& [cost, outputApgcode, componentLine] : components) {
-      if (outputApgcode == "") continue;
-      if (outputApgcode == inputApgcode) continue;
-      if (outputApgcode.substr(0, 2) != "xs") continue;
-
+std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesisSteps(
+    const LifeState& targetPattern,
+    const std::vector<ComponentTemplate>& templates,
+    const std::unordered_map<std::string, SearchResult>* minPaths,
+    int maxPrecursorPop) {
+  
+  std::vector<SynthesisResult> results;
+  std::string targetApgcode = targetPattern.EncodeApgcode();
+  
+  for (const ComponentTemplate& templ : templates) {
+    LifeState matches = templ.MatchReverse(targetPattern);
+    
+    for (auto [x, y] : matches.OnCells()) {
       try {
-        Component comp = Component::FromSJK(componentLine);
+        LifeState transformedBase = templ.base.Moved(x, y);
+        LifeState transformedOut = templ.out.Moved(x, y);
+        
+        Component resultComp;
+        resultComp.base = (targetPattern & ~transformedOut) | transformedBase;
+        resultComp.gliderSet = templ.gliderSet.Moved({x, y});
+        resultComp.out = targetPattern;
+        
+        if (!resultComp.SanityCheck()) continue;
 
-        // We can't handle pure cleanup steps
-        if ((comp.out & ~comp.base).IsEmpty())
+        if (resultComp.base.GetPop() > maxPrecursorPop)
           continue;
 
-        ComponentTemplate templ = ComponentTemplate::FromComponent(comp);
+        std::string precursorApgcode = resultComp.base.EncodeApgcode();
 
-        // Calculate hash for all orientations and use the minimum
-        uint64_t minHash = 0;
-        ComponentTemplate canonicalTempl;
+        if (minPaths != nullptr) {
+          auto outputIt = minPaths->find(targetApgcode);
+          bool newOutput = outputIt == minPaths->end();
+          // if (newOutput) continue;
 
-        using enum SymmetryTransform;
-        for (auto transform :
-             {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY,
-              ReflectAcrossYeqNegXP1, Rotate90, Rotate270, Rotate180OddBoth}) {
-          ComponentTemplate transformedTempl = templ.Transformed(transform);
-          transformedTempl.NormalisePosition();
-          uint64_t hash = transformedTempl.GetHash();
-          if (minHash == 0 || hash < minHash) {
-            minHash = hash;
-            canonicalTempl = transformedTempl;
-          }
+          auto inputIt = minPaths->find(precursorApgcode);
+          if (inputIt == minPaths->end()) continue;
+          if (!newOutput && inputIt->second.cost + resultComp.Cost() >= outputIt->second.cost) continue;
         }
         
-        auto it = uniqueTemplates.find(minHash);
-        
-        // Only add/replace if this is a lower cost template
-        if (it == uniqueTemplates.end() || cost < it->second.second) {
-          // std::cout << componentLine << std::endl;
-          // std::cout << canonicalTempl.RLE() << std::endl;
-          uniqueTemplates[minHash] = std::make_pair(canonicalTempl, cost);
-        }
+        results.emplace_back(resultComp, precursorApgcode, targetApgcode);
       } catch (const std::exception&) {
-        // Skip invalid components
         continue;
       }
+    }
+  }
+  
+  return results;
+}
 
-      total_components++;
+std::vector<std::string> TransferSynthesis::FilterTargetObjects(
+    const std::vector<std::string>& objects,
+    const std::unordered_map<std::string, SearchResult>* minPaths,
+    bool skipExisting) {
+  
+  // Filter objects to only xs patterns
+  std::vector<std::string> xsObjects;
+  for (const auto& obj : objects) {
+    if (obj.substr(0, 2) == "xs") {
+      xsObjects.push_back(obj);
+    }
+  }
+  
+  // If skipExisting is enabled, filter out objects that already have complete synthesis paths
+  if (skipExisting && minPaths != nullptr) {
+    std::vector<std::string> filteredObjects;
+    for (const auto& obj : xsObjects) {
+      if (minPaths->find(obj) == minPaths->end()) {
+        filteredObjects.push_back(obj); // Keep only objects without synthesis paths
+      }
+    }
+    size_t originalCount = xsObjects.size();
+    xsObjects = std::move(filteredObjects);
+    std::cerr << "Filtered from " << originalCount << " to " << xsObjects.size() 
+              << " objects without complete synthesis paths" << std::endl;
+  }
+  
+  return xsObjects;
+}
+
+bool TransferSynthesis::IsPromising(const SynthesisResult& synthesis) {
+  LifeState precursor = synthesis.component.base;
+  auto components = precursor.StillComponents();
+  
+  // Single component is always promising
+  if (components.size() <= 1) {
+    return true;
+  }
+  
+  // Filter out patterns with very small components (blocks, etc.)
+  for (const auto& component : components) {
+    if (component.GetPop() <= 4) {
+      return false;
+    }
+  }
+  
+  // Bounding box strategy: check if components are too distant
+  auto originalBounds = precursor.XYBounds();
+  int originalWidth = originalBounds[2] - originalBounds[0];
+  int originalHeight = originalBounds[3] - originalBounds[1];
+  int originalArea = originalWidth * originalHeight;
+
+  // Density check: if pattern is too sparse overall, likely not promising
+  int population = precursor.GetPop();
+  double density = (double)population / originalArea;
+  if (density < 0.1) {
+    return false;
+  }
+
+  for (const auto& component : components) {
+    LifeState remaining = precursor & ~component;
+    if (remaining.IsEmpty()) continue;
+    
+    auto newBounds = remaining.XYBounds();
+    int newWidth = newBounds[2] - newBounds[0];
+    int newHeight = newBounds[3] - newBounds[1];
+    int newArea = newWidth * newHeight;
+    
+    double areaShrinkage = 1.0 - (double)newArea / originalArea;
+    if (areaShrinkage > 0.3) {
+      return false;
     }
   }
 
-  // Convert to vector
-  std::vector<ComponentTemplate> result;
-  result.reserve(uniqueTemplates.size());
-  for (const auto& [hash, templatePair] : uniqueTemplates) {
-    result.push_back(templatePair.first);
-  }
-
-  if (verbose) {
-    std::cerr << "Loaded " << total_components << " total components" << std::endl;
-    std::cerr << "Loaded " << result.size() << " templates" << std::endl;
-  }
-
-  return result;
+  return true;
 }
 
 void TransferSynthesis::ApplyTemplates(
@@ -124,42 +199,12 @@ void TransferSynthesis::ApplyTemplates(
     const std::unordered_map<std::string, SearchResult> *minPaths) {
 
   for (const LifeState &pattern : patterns) {
-    // std::cout << "Pattern " << pattern << std::endl;
-    for (const ComponentTemplate& templ : templates) {
-      // std::cout << "Template " << templ.RLE() << std::endl;
-      LifeState matches = templ.MatchReverse(pattern);
-
-      for (auto [x, y] : matches.OnCells()) {
-        try {
-          LifeState transformedBase = templ.base.Moved(x, y);
-          LifeState transformedOut = templ.out.Moved(x, y);
-
-          Component resultComp;
-          resultComp.base = (pattern & ~transformedOut) | transformedBase;
-          resultComp.gliderSet = templ.gliderSet.Moved({x, y});
-          resultComp.out = pattern;
-
-          if (minPaths != nullptr) {
-            std::string inputApgcode = resultComp.base.EncodeApgcode();
-            std::string outputApgcode = resultComp.out.EncodeApgcode();
-
-            auto outputIt = minPaths->find(outputApgcode);
-            if (outputIt == minPaths->end()) continue; // Ideally this wouldn't happen, but the torus wrap can cause problems for large outputs
-            auto inputIt = minPaths->find(inputApgcode);
-            if (inputIt == minPaths->end()) continue;
-            if (inputIt->second.cost + resultComp.Cost() >= outputIt->second.cost) continue;
-          }
-
-          if (!resultComp.SanityCheck())
-            continue;
-
-          resultComp.ShiftToFitTorus();
-          std::cout << resultComp.Realise() << std::endl;
-
-        } catch (const std::exception&) {
-          continue;
-        }
-      }
+    auto syntheses = FindSynthesisSteps(pattern, templates, minPaths);
+    
+    for (const auto& synthesis : syntheses) {
+      Component resultComp = synthesis.component;
+      resultComp.ShiftToFitTorus();
+      std::cout << resultComp.Realise() << std::endl;
     }
   }
 }
@@ -168,36 +213,262 @@ void TransferSynthesis::SynthesiseThings(
     const std::vector<std::string> &transferComponentFiles,
     const std::vector<std::string> &objects,
     int chunkSize,
-    const std::unordered_map<std::string, SearchResult> *minPaths) {
+    const std::unordered_map<std::string, SearchResult> *minPaths,
+    bool skipExisting) {
 
   // Load component templates for transfer (these are the ones we'll try to apply)
-  std::vector<ComponentTemplate> templates = LoadComponentTemplates(transferComponentFiles, true);
+  ComponentDatabase db;
+  db.LoadFromFiles(transferComponentFiles, true);
+  std::vector<ComponentTemplate> templates = db.LoadComponentTemplates(true);
 
-  // Filter objects to only xs patterns
-  std::vector<std::string> xsObjects;
-  for (const auto& obj : objects) {
-    if (obj.substr(0, 2) == "xs") {
-      xsObjects.push_back(obj);
+  // Filter target objects
+  std::vector<std::string> xsObjects = FilterTargetObjects(objects, minPaths, skipExisting);
+
+  // Process objects in chunks, generating orientations on-the-fly
+  std::cerr << "Processing " << xsObjects.size() << " target objects" << std::endl;
+  
+  size_t totalPatternsProcessed = 0;
+  std::vector<LifeState> currentChunk;
+  currentChunk.reserve(chunkSize);
+  
+  for (const auto& target : xsObjects) {
+    try {
+      auto orientations = LifeState::DecodeApgcode(target).SymmetryOrbit();
+      
+      for (const auto& pattern : orientations) {
+        currentChunk.push_back(pattern);
+        
+        // Process chunk when it's full
+        if (currentChunk.size() >= static_cast<size_t>(chunkSize)) {
+          ApplyTemplates(currentChunk, templates, minPaths);
+          totalPatternsProcessed += currentChunk.size();
+          std::cerr << totalPatternsProcessed << " patterns complete" << std::endl;
+          currentChunk.clear();
+        }
+      }
+    } catch (const std::exception&) {
+      // Skip invalid apgcodes
+      std::cerr << "Warning: Could not decode apgcode " << target << std::endl;
+      continue;
     }
   }
-
-  // Generate all orientations
-  std::vector<LifeState> allPatterns;
-  for (const auto& target : xsObjects) {
-    auto orientations = LifeState::DecodeApgcode(target).SymmetryOrbit();
-    allPatterns.insert(allPatterns.end(), orientations.begin(), orientations.end());
+  
+  // Process any remaining patterns in the final chunk
+  if (!currentChunk.empty()) {
+    ApplyTemplates(currentChunk, templates, minPaths);
+    totalPatternsProcessed += currentChunk.size();
+    std::cerr << totalPatternsProcessed << " patterns complete" << std::endl;
   }
+}
 
-  std::cerr << "Processing " << allPatterns.size() << " patterns" << std::endl;
+void TransferSynthesis::DepthFirstSynthesis(
+    const std::vector<std::string> &transferComponentFiles,
+    const std::vector<std::string> &objects,
+    int maxDepth,
+    int maxPrecursorPop,
+    const std::unordered_map<std::string, SearchResult> *minPaths,
+    bool skipExisting,
+    bool acceptFirst) {
 
-  for (size_t i = 0; i < allPatterns.size(); i += chunkSize) {
-    size_t j = std::min(i + chunkSize, allPatterns.size());
+  // Load component templates
+  ComponentDatabase db;
+  db.LoadFromFiles(transferComponentFiles, true);
+  std::vector<ComponentTemplate> templates = db.LoadComponentTemplates(true);
 
-    std::vector<LifeState> chunk(allPatterns.begin() + i, allPatterns.begin() + j);
-    ApplyTemplates(chunk, templates, minPaths);
+  // Filter target objects
+  std::vector<std::string> filteredObjects = FilterTargetObjects(objects, minPaths, skipExisting);
 
-    std::cerr << "" << j << " patterns complete" << std::endl;
+  // Build mini synthesis database using ComponentDatabase
+  ComponentDatabase miniDb;
+  
+  // Process each target object
+  std::cerr << "Starting multi-step synthesis (max depth: " << maxDepth 
+            << ", max precursor pop: " << maxPrecursorPop << ")" << std::endl;
+  std::cerr << "Processing " << filteredObjects.size() << " target objects" << std::endl;
+  
+  int successCount = 0;
+  int improvedCount = 0;
+  
+  for (const auto& target : filteredObjects) {
+    // Determine target cost based on existing synthesis
+    unsigned targetCost = std::numeric_limits<unsigned>::max();
+    bool hasExisting = false;
+    
+    if (minPaths != nullptr) {
+      auto it = minPaths->find(target);
+      if (it != minPaths->end()) {
+        targetCost = it->second.cost;
+        hasExisting = true;
+      }
+    }
+    
+    std::cerr << "Searching for " << target;
+    if (hasExisting) {
+      std::cerr << " (trying to beat cost " << targetCost << ")...";
+    } else {
+      std::cerr << " (new synthesis)...";
+    }
+    std::cerr << std::endl;
+    
+    // Build mini database for multi-step synthesis
+    miniDb.db.clear();
+    std::unordered_set<std::string> processed;
+    
+    // Priority queue: (population, depth, apgcode) - lower population processed first
+    using QueueEntry = std::tuple<int, int, std::string>; // population, depth, apgcode
+    std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<QueueEntry>> searchQueue;
+    
+    // Get population of target
+    int targetPop = 0;
+    try {
+      LifeState targetPattern = LifeState::DecodeApgcode(target);
+      targetPop = targetPattern.GetPop();
+    } catch (const std::exception&) {
+      targetPop = 999; // Fallback for unparseable patterns
+    }
+    
+    searchQueue.push({targetPop, 0, target});
+    
+    while (!searchQueue.empty()) {
+      auto [population, depth, currentApgcode] = searchQueue.top();
+      searchQueue.pop();
+      
+      if (processed.find(currentApgcode) != processed.end()) {
+        continue;
+      }
+      processed.insert(currentApgcode);
+      
+      std::cerr << "Processing depth " << depth << ", pop " << population << ": " << currentApgcode << ", remaining in queue: " << searchQueue.size() << std::endl;
+
+      // Skip max-depth patterns since database lookups are now done immediately
+      if (depth >= maxDepth)
+        continue;
+      
+      // Check database for early termination (non-max-depth patterns)
+      if (minPaths != nullptr) {
+        auto it = minPaths->find(currentApgcode);
+        if (it != minPaths->end()) {
+          // Add to mini database as a seed
+          miniDb.db[""].emplace_back(it->second.cost, currentApgcode, ">>" + currentApgcode);
+          std::cerr << "Found in database: " << currentApgcode << " cost " << it->second.cost << std::endl;
+          
+          // If accept-first is enabled and we found a synthesis, stop searching
+          if (acceptFirst && currentApgcode != target) {
+            std::cerr << "Accept-first enabled: stopping search early" << std::endl;
+            break;
+          }
+        }
+      }
+
+      // Find synthesis steps and add to mini database
+      try {
+        LifeState targetPattern = LifeState::DecodeApgcode(currentApgcode);
+        auto orientations = targetPattern.SymmetryOrbit();
+
+        for (const LifeState &pattern : orientations) {
+          // If we're at the lowest depth, allow anything to be looked up in the database
+          int popLimit = depth == maxDepth - 1 ? std::numeric_limits<unsigned>::max() : maxPrecursorPop;
+
+          auto syntheses = FindSynthesisSteps(pattern, templates, nullptr, popLimit);
+
+          for (auto& synthesis : syntheses) {
+            // Filter out unpromising synthesis results
+            if (!IsPromising(synthesis)) {
+              continue;
+            }
+            synthesis.component.ShiftToFitTorus();
+            // Add synthesis to mini database
+            miniDb.db[synthesis.precursorApgcode].emplace_back(
+              synthesis.component.Cost(), 
+              synthesis.targetApgcode, 
+              synthesis.component.Realise().RLE()
+            );
+
+            // If we're at max depth, do database lookup immediately
+            if (depth + 1 >= maxDepth) {
+              if (processed.find(synthesis.precursorApgcode) == processed.end() && minPaths != nullptr) {
+                auto it = minPaths->find(synthesis.precursorApgcode);
+                if (it != minPaths->end()) {
+                  // Add directly to mini database as a seed
+                  processed.insert(synthesis.precursorApgcode);
+                  miniDb.db[""].emplace_back(it->second.cost, synthesis.precursorApgcode, ">>" + synthesis.precursorApgcode);
+                  std::cerr << "Found in database at max depth: " << synthesis.precursorApgcode << " cost " << it->second.cost << std::endl;
+                  
+                  // If accept-first is enabled, stop searching immediately
+                  if (acceptFirst) {
+                    std::cerr << "Accept-first enabled: stopping search early after max-depth lookup" << std::endl;
+                    goto search_complete;
+                  }
+                }
+              }
+            } else {
+              // Get precursor population for priority queue
+              int precursorPop = synthesis.component.base.GetPop();
+              
+              // Add precursor to search queue with priority based on population
+              searchQueue.push({precursorPop, depth + 1, synthesis.precursorApgcode});
+            }
+          }
+        }
+      } catch (const std::exception&) {
+        continue;
+      }
+    }
+    
+    search_complete:
+    // Run Dijkstra on mini database to find optimal synthesis
+    auto results = miniDb.Dijkstra();
+    unsigned foundCost = std::numeric_limits<unsigned>::max();
+
+    auto targetIt = results.find(target);
+    if (targetIt != results.end()) {
+      foundCost = targetIt->second.cost;
+
+      if (foundCost < targetCost) {
+        // Output the synthesis components by following the path
+        std::string current = target;
+        std::vector<std::string> synthesisPath;
+      
+        while (!current.empty() && current != "") {
+          auto resultIt = results.find(current);
+          if (resultIt == results.end() || resultIt->second.predecessor.empty()) break;
+        
+          synthesisPath.push_back(resultIt->second.componentLine);
+          current = resultIt->second.predecessor;
+        }
+      
+        // Output components in synthesis order
+        for (auto it = synthesisPath.rbegin(); it != synthesisPath.rend(); ++it) {
+          std::cout << *it << std::endl;
+        }
+      }
+
+    }
+    
+    if (foundCost != std::numeric_limits<unsigned>::max()) {
+      successCount++;
+      if (hasExisting && foundCost < targetCost) {
+        improvedCount++;
+        std::cerr << "✓ Improved synthesis for " << target 
+                  << " (cost " << targetCost << " → " << foundCost << ")" << std::endl;
+      } else if (!hasExisting) {
+        std::cerr << "✓ Found new synthesis for " << target 
+                  << " (cost " << foundCost << ")" << std::endl;
+      } else {
+        std::cerr << "✗ No improvement found for " << target
+                  << " (keeping existing cost " << targetCost << ")" << std::endl;
+      }
+    } else {
+      std::cerr << "✗ No synthesis found for " << target << std::endl;
+    }
   }
+  
+  std::cerr << "Synthesis complete: " << successCount << "/" << filteredObjects.size() 
+            << " targets processed";
+  if (improvedCount > 0) {
+    std::cerr << " (" << improvedCount << " improved)";
+  }
+  std::cerr << std::endl;
 }
 
 
@@ -229,11 +500,11 @@ std::vector<std::string> readTargetFile(const std::string& filename) {
     return targets;
 }
 
-std::vector<std::string> getMostExpensiveTargets(const ComponentDatabase& db, int countPerClass, int maxPopulation, bool verbose) {
-    // Group patterns by population, tracking their minimum cost
+std::vector<std::string> getMostExpensiveTargets(const std::unordered_map<std::string, SearchResult>& dijkstraResults, int countPerClass, int maxPopulation, int specificPopulation, bool includePseudo, bool verbose) {
+    // Group patterns by population, tracking their Dijkstra cost
     std::unordered_map<int, std::vector<std::pair<unsigned, std::string>>> byPopulation;
     
-    for (const auto& [apgcode, components] : db.db) {
+    for (const auto& [apgcode, searchResult] : dijkstraResults) {
         if (apgcode.empty() || apgcode.substr(0, 2) != "xs") continue;
         
         // Extract population from apgcode (e.g., "xs19_..." -> 19)
@@ -248,17 +519,31 @@ std::vector<std::string> getMostExpensiveTargets(const ComponentDatabase& db, in
             continue;
         }
         
-        // Skip populations above the maximum
-        if (population > maxPopulation) continue;
-        
-        // Find minimum cost for this apgcode
-        unsigned minCost = std::numeric_limits<unsigned>::max();
-        for (const auto& [cost, outputApgcode, componentLine] : components) {
-            minCost = std::min(minCost, cost);
+        // Filter by population based on mode
+        if (specificPopulation >= 0) {
+            // Specific population mode: only include exact match
+            if (population != specificPopulation) continue;
+        } else {
+            // Maximum population mode: skip populations above the maximum
+            if (population > maxPopulation) continue;
         }
         
-        if (minCost != std::numeric_limits<unsigned>::max()) {
-            byPopulation[population].emplace_back(minCost, apgcode);
+        // Filter pseudo still lifes unless explicitly included
+        if (!includePseudo) {
+            try {
+                LifeState pattern = LifeState::DecodeApgcode(apgcode);
+                if (pattern.IsPseudoStillLife()) {
+                    continue; // Skip pseudo still lifes
+                }
+            } catch (const std::exception&) {
+                // If we can't decode, assume it's not pseudo and include it
+            }
+        }
+        
+        // Use Dijkstra cost (optimal synthesis cost)
+        unsigned cost = static_cast<unsigned>(searchResult.cost);
+        if (cost != std::numeric_limits<unsigned>::max()) {
+            byPopulation[population].emplace_back(cost, apgcode);
         }
     }
     
@@ -291,14 +576,19 @@ std::vector<std::string> getMostExpensiveTargets(const ComponentDatabase& db, in
     }
     
     if (verbose) {
-        std::cerr << "Total selected: " << result.size() << " patterns (populations <= " << maxPopulation << ")" << std::endl;
+        std::string pseudoNote = includePseudo ? "" : ", excluding pseudo still lifes";
+        if (specificPopulation >= 0) {
+            std::cerr << "Total selected: " << result.size() << " patterns (population = " << specificPopulation << pseudoNote << ")" << std::endl;
+        } else {
+            std::cerr << "Total selected: " << result.size() << " patterns (populations <= " << maxPopulation << pseudoNote << ")" << std::endl;
+        }
     }
     
     return result;
 }
 
 int main(int argc, char* argv[]) {
-    CLI::App app{"Transfer synthesis tool for Conway's Game of Life patterns"};
+    CLI::App app{"Transfer synthesis tool"};
     
     // Basic arguments
     std::string transferPath;
@@ -310,14 +600,32 @@ int main(int argc, char* argv[]) {
     bool verbose = false;
     app.add_flag("-v,--verbose", verbose, "Enable verbose output");
     
-    int chunkSize = 64;
+    int chunkSize = 128;
     app.add_option("-c,--chunk-size", chunkSize, "Process patterns in chunks of size N")
-        ->default_val(64);
+        ->default_val(128);
     
     // Dijkstra option
     std::string costPath;
     auto dijkstra_opt = app.add_option("--use-dijkstra", costPath, 
         "Use Dijkstra paths for optimization with cost directory or file");
+    
+    // Skip existing option (requires Dijkstra)
+    bool skipExisting = false;
+    auto skip_existing_opt = app.add_flag("--skip-existing", skipExisting, 
+        "Skip targets that already have complete synthesis paths (requires --use-dijkstra)");
+    skip_existing_opt->needs(dijkstra_opt);
+    
+    // Depth-first search options
+    bool depthFirstSearch = false;
+    auto depth_first_opt = app.add_flag("--depth-first", depthFirstSearch, "Use depth-first search for multi-step synthesis");
+    
+    int maxDepth = 3;
+    app.add_option("--max-depth", maxDepth, "Maximum search depth for depth-first synthesis")
+        ->default_val(3);
+    
+    int maxPrecursorPop = 30;
+    app.add_option("--max-precursor-pop", maxPrecursorPop, "Maximum population of precursor patterns")
+        ->default_val(30);
     
     // Mutually exclusive target selection
     auto target_group = app.add_option_group("target_selection", "Target selection (exactly one required)");
@@ -331,18 +639,48 @@ int main(int argc, char* argv[]) {
         "Target the N most expensive syntheses of each population class")
         ->default_val(1000);
     
-    // Population limit for most-expensive mode
+    // Population selection for most-expensive mode
     int maxPopulation = 60;
-    app.add_option("--max-population", maxPopulation, 
+    auto max_pop_opt = app.add_option("--max-population", maxPopulation, 
         "Maximum population to consider (only with --most-expensive)")
-        ->default_val(60)
+        ->default_val(60);
+    
+    int specificPopulation = -1;
+    auto specific_pop_opt = app.add_option("--population", specificPopulation, 
+        "Target specific population only (only with --most-expensive)");
+    
+    // Both population options need --most-expensive and are mutually exclusive
+    max_pop_opt->needs(expensive_opt);
+    specific_pop_opt->needs(expensive_opt);
+    max_pop_opt->excludes(specific_pop_opt);
+    specific_pop_opt->excludes(max_pop_opt);
+    
+    // Option to include pseudo still lifes (excluded by default in --most-expensive)
+    bool includePseudo = false;
+    app.add_flag("--include-pseudo", includePseudo, 
+        "Include pseudo still lifes as targets (only with --most-expensive)")
         ->needs(expensive_opt);
+    
+    // Option to accept first synthesis found instead of searching for optimal
+    bool acceptFirst = skipExisting;
+    auto accept_first_opt = app.add_flag("--accept-first", acceptFirst, 
+        "Stop search as soon as any synthesis is found (only with --depth-first)");
+    accept_first_opt->needs(depth_first_opt);
     
     // Make exactly one target selection required
     target_group->require_option(1);
     
     // most-expensive requires dijkstra
     expensive_opt->needs(dijkstra_opt);
+    
+    // Add validation: --most-expensive requires exactly one population option
+    app.callback([&]() {
+        if (*expensive_opt) {
+            if (!(*max_pop_opt || *specific_pop_opt)) {
+                throw CLI::ValidationError("--most-expensive requires either --max-population or --population");
+            }
+        }
+    });
     
     // Parse command line
     try {
@@ -364,12 +702,13 @@ int main(int argc, char* argv[]) {
             std::cout << "Found " << transferComponentFiles.size() << " transfer component files" << std::endl;
         }
         
-        // Get target objects based on mode
-        std::vector<std::string> targets;
-        if (*expensive_opt) {
-            // Load cost database to find most expensive targets
+        // Run Dijkstra if requested (needed for both target selection and optimization)
+        std::unordered_map<std::string, SearchResult> dijkstraResults;
+        const std::unordered_map<std::string, SearchResult>* minPaths = nullptr;
+        
+        if (*dijkstra_opt) {
             if (verbose) {
-                std::cerr << "Loading cost database to find most expensive targets..." << std::endl;
+                std::cerr << "Running Dijkstra's algorithm on " << costPath << "..." << std::endl;
             }
             
             std::vector<std::string> costComponentFiles = GetSJKFiles(costPath);
@@ -378,9 +717,24 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             
-            ComponentDatabase costDb;
-            costDb.LoadFromFiles(costComponentFiles, verbose);
-            targets = getMostExpensiveTargets(costDb, expensiveCount, maxPopulation, verbose);
+            ComponentDatabase db;
+            db.LoadFromFiles(costComponentFiles, verbose);
+            dijkstraResults = db.Dijkstra();
+            minPaths = &dijkstraResults;
+            
+            if (verbose) {
+                std::cerr << "Dijkstra found paths to " << dijkstraResults.size() << " objects" << std::endl;
+            }
+        }
+
+        // Get target objects based on mode
+        std::vector<std::string> targets;
+        if (*expensive_opt) {
+            if (verbose) {
+                std::cerr << "Finding most expensive targets from Dijkstra results..." << std::endl;
+            }
+            
+            targets = getMostExpensiveTargets(dijkstraResults, expensiveCount, maxPopulation, specificPopulation, includePseudo, verbose);
         } else {
             // Read targets from file
             targets = readTargetFile(targetFile);
@@ -395,40 +749,30 @@ int main(int argc, char* argv[]) {
             std::cerr << "Loaded " << targets.size() << " target objects" << std::endl;
         }
         
-        // Run Dijkstra if requested
-        std::unique_ptr<std::unordered_map<std::string, SearchResult>> minPaths;
-        if (*dijkstra_opt) {
-            if (verbose) {
-                std::cerr << "Running Dijkstra's algorithm on " << costPath << "..." << std::endl;
-            }
-            
-            std::vector<std::string> costComponentFiles = GetSJKFiles(costPath);
-            if (costComponentFiles.empty()) {
-                std::cerr << "Error: No .sjk files found in cost path " << costPath << std::endl;
-                return 1;
-            }
-            
-            ComponentDatabase db;
-            db.LoadFromFiles(costComponentFiles, verbose);
-            auto dijkstraResult = db.Dijkstra();
-            minPaths = std::make_unique<std::unordered_map<std::string, SearchResult>>(std::move(dijkstraResult));
-            
-            if (verbose) {
-                std::cerr << "Dijkstra found paths to " << minPaths->size() << " objects" << std::endl;
-            }
-        }
-        
         // Run synthesis
         if (verbose) {
             std::cout << "Starting synthesis..." << std::endl;
         }
         
-        TransferSynthesis::SynthesiseThings(
-            transferComponentFiles, 
-            targets, 
-            chunkSize,
-            minPaths.get()
-        );
+        if (depthFirstSearch) {
+            TransferSynthesis::DepthFirstSynthesis(
+                transferComponentFiles,
+                targets,
+                maxDepth,
+                maxPrecursorPop,
+                minPaths,
+                skipExisting,
+                acceptFirst
+            );
+        } else {
+            TransferSynthesis::SynthesiseThings(
+                transferComponentFiles, 
+                targets, 
+                chunkSize,
+                minPaths,
+                skipExisting
+            );
+        }
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
