@@ -144,15 +144,20 @@ GliderSet GliderSet::Moved(std::pair<int, int> p) const {
 std::pair<int, int> GliderSet::OffsetToFitTorus() const {
   const int DANGER_ZONE = 16;
 
-  LifeState southWrapped = (se | sw) & LifeState::SolidRect(-32, 32 - DANGER_ZONE, 64, DANGER_ZONE);
-  LifeState northWrapped = (nw | ne) & LifeState::SolidRect(-32, -32, 64, DANGER_ZONE);
-  LifeState eastWrapped = (se | ne) & LifeState::SolidRect(32 - DANGER_ZONE, -32, DANGER_ZONE, 64);
-  LifeState westWrapped = (sw | nw) & LifeState::SolidRect(-32, -32, DANGER_ZONE, 64);
+  LifeState south = se | sw;
+  LifeState north = nw | ne;
+  LifeState east = se | ne;
+  LifeState west = sw | nw;
 
-  bool southProblematic = !southWrapped.IsEmpty();
-  bool northProblematic = !northWrapped.IsEmpty();
-  bool eastProblematic = !eastWrapped.IsEmpty();
-  bool westProblematic = !westWrapped.IsEmpty();
+  LifeState southZone = LifeState::SolidRect(-32, 32 - DANGER_ZONE, 64, DANGER_ZONE);
+  LifeState northZone = LifeState::SolidRect(-32, -32, 64, DANGER_ZONE);
+  LifeState eastZone = LifeState::SolidRect(32 - DANGER_ZONE, -32, DANGER_ZONE, 64);
+  LifeState westZone = LifeState::SolidRect(-32, -32, DANGER_ZONE, 64);
+
+  bool southProblematic = !(south & southZone).IsEmpty() && (north & southZone).IsEmpty();
+  bool northProblematic = !(north & northZone).IsEmpty() && (south & northZone).IsEmpty();
+  bool eastProblematic = !(east & eastZone).IsEmpty() && (west & eastZone).IsEmpty();
+  bool westProblematic = !(west & westZone).IsEmpty() && (east & westZone).IsEmpty();
 
   int shiftX = 0;
   int shiftY = 0;
