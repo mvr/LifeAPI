@@ -14,6 +14,7 @@ struct ComponentTemplate {
   LifeState out;
 
   static ComponentTemplate FromComponent(const Component &component);
+  LifeState MatchReverse(const LifeState &state, const NeighbourCount &count) const;
   LifeState MatchReverse(const LifeState &state) const;
 
   ComponentTemplate Transformed(SymmetryTransform t) const;
@@ -68,12 +69,10 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
           component.out & relevant};
 }
 
-LifeState ComponentTemplate::MatchReverse(const LifeState &state) const {
+LifeState ComponentTemplate::MatchReverse(const LifeState &state, const NeighbourCount &stateCount) const {
   LifeState candidates = state.MatchLiveAndDead(out, knownOff);
   if(candidates.IsEmpty())
     return LifeState();
-
-  NeighbourCount stateCount(state);
 
   candidates &= stateCount.bit0.MatchLive(count.bit0);
   if(candidates.IsEmpty())
@@ -84,6 +83,11 @@ LifeState ComponentTemplate::MatchReverse(const LifeState &state) const {
   candidates &= stateCount.bit2.MatchLive(count.bit2);
 
   return candidates;
+}
+
+LifeState ComponentTemplate::MatchReverse(const LifeState &state) const {
+  NeighbourCount stateCount(state);
+  return MatchReverse(state, stateCount);
 }
 
 ComponentTemplate ComponentTemplate::Transformed(SymmetryTransform t) const {

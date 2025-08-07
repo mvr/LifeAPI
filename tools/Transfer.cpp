@@ -162,9 +162,11 @@ std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesis
 
   std::vector<SynthesisResult> results;
   std::string targetApgcode = targetPattern.EncodeApgcode();
-  
+
+  NeighbourCount stateCount(targetPattern);
+
   for (const ComponentTemplate& templ : templates) {
-    LifeState matches = templ.MatchReverse(targetPattern);
+    LifeState matches = templ.MatchReverse(targetPattern, stateCount);
     
     for (auto [x, y] : matches.OnCells()) {
       try {
