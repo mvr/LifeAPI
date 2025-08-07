@@ -477,7 +477,7 @@ std::vector<std::string> readTargetFile(const std::string& filename) {
     return targets;
 }
 
-std::vector<std::string> getMostExpensiveTargets(const std::unordered_map<std::string, SearchResult>& dijkstraResults, int countPerClass, int maxPopulation, int specificPopulation, bool includePseudo, bool verbose) {
+std::vector<std::string> getMostExpensiveTargets(const std::unordered_map<std::string, SearchResult>& dijkstraResults, int countPerClass, int minPopulation, int maxPopulation, int specificPopulation, bool includePseudo, bool verbose) {
     // Group patterns by population, tracking their Dijkstra cost
     std::unordered_map<int, std::vector<std::pair<unsigned, std::string>>> byPopulation;
     
@@ -501,8 +501,8 @@ std::vector<std::string> getMostExpensiveTargets(const std::unordered_map<std::s
             // Specific population mode: only include exact match
             if (population != specificPopulation) continue;
         } else {
-            // Maximum population mode: skip populations above the maximum
-            if (population > maxPopulation) continue;
+            // Range mode: skip populations outside the range
+            if (population < minPopulation || population > maxPopulation) continue;
         }
         
         // Filter pseudo still lifes unless explicitly included
@@ -557,7 +557,7 @@ std::vector<std::string> getMostExpensiveTargets(const std::unordered_map<std::s
         if (specificPopulation >= 0) {
             std::cerr << "Total selected: " << result.size() << " patterns (population = " << specificPopulation << pseudoNote << ")" << std::endl;
         } else {
-            std::cerr << "Total selected: " << result.size() << " patterns (populations <= " << maxPopulation << pseudoNote << ")" << std::endl;
+            std::cerr << "Total selected: " << result.size() << " patterns (populations " << minPopulation << "-" << maxPopulation << pseudoNote << ")" << std::endl;
         }
     }
     
@@ -613,6 +613,11 @@ int main(int argc, char* argv[]) {
         ->default_val(1000);
     
     // Population selection for most-expensive mode
+    int minPopulation = 0;
+    auto min_pop_opt = app.add_option("--min-population", minPopulation, 
+        "Minimum population to consider (only with --most-expensive)")
+        ->default_val(0);
+        
     int maxPopulation = 60;
     auto max_pop_opt = app.add_option("--max-population", maxPopulation, 
         "Maximum population to consider (only with --most-expensive)")
@@ -622,11 +627,14 @@ int main(int argc, char* argv[]) {
     auto specific_pop_opt = app.add_option("--population", specificPopulation, 
         "Target specific population only (only with --most-expensive)");
     
-    // Both population options need --most-expensive and are mutually exclusive
+    // Population options need --most-expensive and are mutually exclusive with --population
+    min_pop_opt->needs(expensive_opt);
     max_pop_opt->needs(expensive_opt);
     specific_pop_opt->needs(expensive_opt);
     max_pop_opt->excludes(specific_pop_opt);
+    min_pop_opt->excludes(specific_pop_opt);
     specific_pop_opt->excludes(max_pop_opt);
+    specific_pop_opt->excludes(min_pop_opt);
     
     // Option to include pseudo still lifes (excluded by default in --most-expensive)
     bool includePseudo = false;
@@ -642,11 +650,11 @@ int main(int argc, char* argv[]) {
     // Make exactly one target selection required
     target_group->require_option(1);
 
-    // Add validation: --most-expensive requires exactly one population option
+    // Add validation: --most-expensive requires at least one population option
     app.callback([&]() {
         if (*expensive_opt) {
-            if (!(*max_pop_opt || *specific_pop_opt)) {
-                throw CLI::ValidationError("--most-expensive requires either --max-population or --population");
+            if (!(*min_pop_opt || *max_pop_opt || *specific_pop_opt)) {
+                throw CLI::ValidationError("--most-expensive requires population constraint (--min-population, --max-population, or --population)");
             }
         }
     });
@@ -699,7 +707,7 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Finding most expensive targets from Dijkstra results..." << std::endl;
             }
             
-            targets = getMostExpensiveTargets(dijkstraResults, expensiveCount, maxPopulation, specificPopulation, includePseudo, verbose);
+            targets = getMostExpensiveTargets(dijkstraResults, expensiveCount, minPopulation, maxPopulation, specificPopulation, includePseudo, verbose);
         } else {
             // Read targets from file
             targets = readTargetFile(targetFile);
