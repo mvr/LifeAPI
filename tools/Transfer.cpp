@@ -44,6 +44,7 @@ public:
       bool skipExisting = false);
 
   // Check if a synthesis result is promising (filters out hopeless cases like distant blocks/tubs)
+  static bool IsSparse(const LifeState& state);
   static bool IsPromising(const SynthesisResult& synthesis);
 
 
@@ -139,49 +140,102 @@ std::vector<std::string> TransferSynthesis::FilterTargetObjects(
   return xsObjects;
 }
 
-bool TransferSynthesis::IsPromising(const SynthesisResult& synthesis) {
-  LifeState precursor = synthesis.component.base;
-  auto components = precursor.StillComponents();
-  
-  // Single component is always promising
+bool TransferSynthesis::IsSparse(const LifeState &state) {
+  auto components = state.StillComponents();
+
+  // Single component is not sparse
   if (components.size() <= 1) {
-    return true;
+    return false;
   }
-  
-  // Filter out patterns with very small components (blocks, etc.)
-  for (const auto& component : components) {
-    if (component.GetPop() <= 4) {
-      return false;
-    }
-  }
-  
+
   // Bounding box strategy: check if components are too distant
-  auto originalBounds = precursor.XYBounds();
+  auto originalBounds = state.XYBounds();
   int originalWidth = originalBounds[2] - originalBounds[0];
   int originalHeight = originalBounds[3] - originalBounds[1];
   int originalArea = originalWidth * originalHeight;
 
   // Density check: if pattern is too sparse overall, likely not promising
-  int population = precursor.GetPop();
+  int population = state.GetPop();
   double density = (double)population / originalArea;
-  if (density < 0.1) {
+  if (density < 0.05) {
+    return true;
+  }
+
+  LifeState largest;
+  unsigned largest_pop = 0;
+
+  for (const auto &component : components) {
+    unsigned pop = component.GetPop();
+    if (pop > largest_pop) {
+      largest = component;
+      largest_pop = pop;
+    }
+  }
+
+  if (!(state & ~largest.Convolve(LifeState::ConstantParse("7o$7o$7o$7o$7o$7o$7o!", -3, -3))).IsEmpty())
+    return true;
+
+  // ALSO OLD
+  // auto newBounds = largest.XYBounds();
+  // int newWidth = newBounds[2] - newBounds[0];
+  // int newHeight = newBounds[3] - newBounds[1];
+  // int newArea = newWidth * newHeight;
+
+  // double areaShrinkage = 1.0 - (double)newArea / originalArea;
+  // if (areaShrinkage > 0.3) {
+  //   return true;
+  // }
+
+
+  // OLD
+  // for (const auto& component : components) {
+  //   LifeState remaining = state & ~component;
+  //   if (remaining.IsEmpty()) continue;
+
+  //   auto newBounds = remaining.XYBounds();
+  //   int newWidth = newBounds[2] - newBounds[0];
+  //   int newHeight = newBounds[3] - newBounds[1];
+  //   int newArea = newWidth * newHeight;
+
+  //   double areaShrinkage = 1.0 - (double)newArea / originalArea;
+  //   if (areaShrinkage > 0.4) {
+  //     return true;
+  //   }
+  // }
+
+  return false;
+}
+
+bool TransferSynthesis::IsPromising(const SynthesisResult& synthesis) {
+
+  // // Filter out patterns with very small components (blocks, etc.)
+  // for (const auto& component : components) {
+  //   if (component.GetPop() <= 4) {
+  //     std::cerr << "Unpromising small component " << synthesis.precursorApgcode << std::endl;
+  //     return false;
+  //   }
+  // }
+
+  // Pure additions are always fine:
+  if ((synthesis.component.base & ~synthesis.component.out).IsEmpty()) {
+    return true;
+  }
+
+  if (IsSparse(synthesis.component.base) &&
+      IsSparse(synthesis.component.out)) {
+    // std::cerr << "Unpromising density " << synthesis.precursorApgcode << std::endl;
+
     return false;
   }
 
-  for (const auto& component : components) {
-    LifeState remaining = precursor & ~component;
-    if (remaining.IsEmpty()) continue;
-    
-    auto newBounds = remaining.XYBounds();
-    int newWidth = newBounds[2] - newBounds[0];
-    int newHeight = newBounds[3] - newBounds[1];
-    int newArea = newWidth * newHeight;
-    
-    double areaShrinkage = 1.0 - (double)newArea / originalArea;
-    if (areaShrinkage > 0.3) {
-      return false;
-    }
-  }
+  // Steps that just shove a block or tub around are not promising
+  LifeState before = synthesis.component.base & ~synthesis.component.out;
+  bool beforeBlock = before.GetPop() == 4 && before.Stepped() == before;
+  LifeState after = ~synthesis.component.base & synthesis.component.out;
+  bool afterBlock = after.GetPop() == 4 && after.Stepped() == after;
+
+  if (beforeBlock && afterBlock)
+    return false;
 
   return true;
 }

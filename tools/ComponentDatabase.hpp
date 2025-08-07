@@ -256,26 +256,48 @@ bool ComponentDatabase::IsUsefulComponent(const Component& comp) {
     return false;
   }
 
-  // Filter out components which cause separated changes
-  auto diffComponents = (comp.out ^ comp.base).Components(LifeState::ConstantParse("5o$5o$5o$5o$5o!", -2, -2));
-  if (diffComponents.size() > 1) {
-    return false;
-  }
-
-  // Filter out components where input still lifes have population <= 7
+  // Filter out components where all input still lifes are small
   // (these are likely syntheses replicating soups)
   auto components = comp.base.StillComponents();
   if (components.size() > 0) {
     bool hasLargeComponent = false;
     for (const auto& component : components) {
-      if (component.GetPop() > 7) {
+      if (component.GetPop() > 6) {
         hasLargeComponent = true;
         break;
       }
     }
     if (!hasLargeComponent) {
-      return false; // All components are small (< 7 cells)
+      std::cerr << "Skipping all small component " << comp.Realise() << std::endl;
+      return false;
     }
+  }
+
+  LifeState state = comp.Realise();
+  LifeState everActive;
+  unsigned gen = 0;
+
+  bool done = false;
+  while (!done) {
+    LifeState prev = state;
+
+    everActive |= state ^ comp.base;
+
+    state.Step();
+    gen++;
+    if (state == prev)
+      done = true;
+    if (gen > 300)
+      throw std::runtime_error("Component took too long");
+  }
+
+  // Filter out components which cause disconnected changes
+  // The vast majority of these are the same component applied
+  // symmetrically
+  auto diffComponents = everActive.Components(LifeState::ConstantParse("5o$5o$5o$5o$5o!", -2, -2));
+  if (diffComponents.size() > 1) {
+    std::cerr << "Skipping disconnected component " << comp.Realise() << std::endl;
+    return false;
   }
 
   return true;
