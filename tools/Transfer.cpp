@@ -9,11 +9,101 @@
 #include <limits>
 #include <functional>
 #include <queue>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 
 #include "../Component.hpp"
 #include "../ComponentTemplate.hpp"
 #include "ComponentDatabase.hpp"
 #include "CLI11/include/CLI/CLI.hpp"
+
+template<typename T>
+class ThreadSafeQueue {
+private:
+    std::priority_queue<T, std::vector<T>, std::greater<T>> queue_;
+    mutable std::mutex mutex_;
+    std::condition_variable condition_;
+    std::atomic<int> waiting_threads_{0};
+    std::atomic<int> active_threads_{0};
+    std::atomic<bool> shutdown_{false};
+
+public:
+    void push(const T& item) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (shutdown_) return;
+        queue_.push(item);
+        condition_.notify_one();
+    }
+
+    bool pop(T& item) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        
+        while (true) {
+            if (shutdown_) {
+                return false;
+            }
+            
+            if (!queue_.empty()) {
+                item = queue_.top();
+                queue_.pop();
+                return true;
+            }
+            
+            // Queue is empty, increment waiting threads
+            ++waiting_threads_;
+            
+            // Check if all threads are waiting (meaning no one is actively processing)
+            if (waiting_threads_ == active_threads_) {
+                // All threads are waiting and queue is empty - time to shutdown
+                shutdown_ = true;
+                --waiting_threads_;
+                condition_.notify_all();
+                return false;
+            }
+            
+            // Wait for either new items or shutdown
+            condition_.wait(lock, [this] { 
+                return !queue_.empty() || shutdown_; 
+            });
+            
+            --waiting_threads_;
+        }
+    }
+    
+    void register_thread() {
+        ++active_threads_;
+    }
+    
+    void unregister_thread() {
+        --active_threads_;
+    }
+    
+    bool empty() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return queue_.empty();
+    }
+    
+    size_t size() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return queue_.size();
+    }
+    
+    int waiting_threads() const {
+        return waiting_threads_.load();
+    }
+    
+    int active_threads() const {
+        return active_threads_.load();
+    }
+    
+    void shutdown() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        shutdown_ = true;
+        condition_.notify_all();
+    }
+};
 
 class TransferSynthesis {
 public:
@@ -56,7 +146,11 @@ public:
       int maxPrecursorPop = 30,
       bool skipExisting = false,
       bool acceptFirst = false,
+      int numThreads = 1,
       unsigned minTemplateOccurrences = 1);
+
+private:
+  using QueueEntry = std::tuple<int, int, std::string>; // population, depth, apgcode
 };
 
 std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesisSteps(
@@ -249,6 +343,7 @@ void TransferSynthesis::RunSynthesis(
     int maxPrecursorPop,
     bool skipExisting,
     bool acceptFirst,
+    int numThreads,
     unsigned minTemplateOccurrences) {
 
   // Load component templates
@@ -293,9 +388,14 @@ void TransferSynthesis::RunSynthesis(
     miniDb.db.clear();
     std::unordered_set<std::string> processed;
     
-    // Priority queue: (population, depth, apgcode) - lower population processed first
-    using QueueEntry = std::tuple<int, int, std::string>; // population, depth, apgcode
-    std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<QueueEntry>> searchQueue;
+    // Thread-safe queue for multithreaded processing
+    ThreadSafeQueue<QueueEntry> searchQueue;
+    
+    // Mutexes for shared data structures
+    std::mutex processedMutex;
+    std::mutex miniDbMutex;
+    std::mutex cerrMutex;
+    std::atomic<bool> shouldStop{false};
     
     // Get population of target
     int targetPop = 0;
@@ -308,91 +408,170 @@ void TransferSynthesis::RunSynthesis(
     
     searchQueue.push({targetPop, 0, target});
     
-    while (!searchQueue.empty()) {
-      auto [population, depth, currentApgcode] = searchQueue.top();
-      searchQueue.pop();
+    {
+      std::lock_guard<std::mutex> lock(cerrMutex);
+      std::cerr << "Starting multithreaded search with " << numThreads << " threads" << std::endl;
+    }
+    
+    // Create worker lambda
+    auto workerLambda = [&]() {
+      // Register this thread with the queue
+      searchQueue.register_thread();
       
-      if (processed.find(currentApgcode) != processed.end()) {
-        continue;
-      }
-      processed.insert(currentApgcode);
-      
-      std::cerr << "Processing depth " << depth << ", pop " << population << ": " << currentApgcode << ", remaining in queue: " << searchQueue.size() << std::endl;
-
-      // Skip max-depth patterns since database lookups are now done immediately
-      if (depth >= maxDepth)
-        continue;
-      
-      // Check database for early termination (non-max-depth patterns)
-      auto it = minPaths.find(currentApgcode);
-      if (it != minPaths.end()) {
-        // Add to mini database as a seed
-        miniDb.db[""].emplace_back(it->second.cost, currentApgcode, ">>" + currentApgcode);
-        std::cerr << "Found in database: " << currentApgcode << " cost " << it->second.cost << std::endl;
+      QueueEntry entry;
+      while (searchQueue.pop(entry)) {
+        if (shouldStop.load()) {
+          break;
+        }
         
-        // If accept-first is enabled and we found a synthesis, stop searching
-        if (acceptFirst && currentApgcode != target) {
-          std::cerr << "Accept-first enabled: stopping search early" << std::endl;
+        auto [population, depth, currentApgcode] = entry;
+        
+        // Check if already processed
+        {
+          std::lock_guard<std::mutex> lock(processedMutex);
+          if (processed.find(currentApgcode) != processed.end()) {
+            continue;
+          }
+          processed.insert(currentApgcode);
+        }
+        
+        {
+          std::lock_guard<std::mutex> lock(cerrMutex);
+          std::cerr << "Processing depth " << depth << ", pop " << population << ": " << currentApgcode << ", queue size: " << searchQueue.size() << std::endl;
+        }
+
+        // Skip max-depth patterns since database lookups are now done immediately
+        if (depth >= maxDepth) {
+          continue;
+        }
+        
+        // Check database for early termination (non-max-depth patterns)
+        auto it = minPaths.find(currentApgcode);
+        if (it != minPaths.end()) {
+          // Add to mini database as a seed
+          {
+            std::lock_guard<std::mutex> lock(miniDbMutex);
+            miniDb.db[""].emplace_back(it->second.cost, currentApgcode, ">>" + currentApgcode);
+          }
+          {
+            std::lock_guard<std::mutex> lock(cerrMutex);
+            std::cerr << "Found in database: " << currentApgcode << " cost " << it->second.cost << std::endl;
+          }
+          
+          // If accept-first is enabled and we found a synthesis, stop searching
+          if (acceptFirst) {
+            {
+              std::lock_guard<std::mutex> lock(cerrMutex);
+              std::cerr << "Accept-first enabled: stopping search early" << std::endl;
+            }
+            shouldStop.store(true);
+            searchQueue.shutdown();
+            break;
+          }
+        }
+
+        // Find synthesis steps and add to mini database
+        try {
+          LifeState targetPattern = LifeState::DecodeApgcode(currentApgcode);
+          auto orientations = targetPattern.SymmetryOrbit();
+
+          for (const LifeState &pattern : orientations) {
+            // If we're at the lowest depth, allow anything to be looked up in the database
+            int popLimit = depth == maxDepth - 1 ? std::numeric_limits<unsigned>::max() : maxPrecursorPop;
+
+            auto syntheses = FindSynthesisSteps(pattern, templates, minPaths, popLimit, false);
+
+            for (auto& synthesis : syntheses) {
+              // Filter out unpromising synthesis results
+              if (depth + 1 < maxDepth && !IsPromising(synthesis)) {
+                continue;
+              }
+              synthesis.component.ShiftToFitTorus();
+              // if(synthesis.component.base.GetPop() <= 30 && IsPromising(synthesis))
+              //   std::cout << synthesis.component.Realise() << std::endl;
+              // Add synthesis to mini database
+              {
+                std::lock_guard<std::mutex> lock(miniDbMutex);
+                miniDb.db[synthesis.precursorApgcode].emplace_back(
+                  synthesis.component.Cost(), 
+                  synthesis.targetApgcode, 
+                  synthesis.component.Realise().RLE()
+                );
+              }
+
+              // If we're at max depth, do database lookup immediately
+              if (depth + 1 >= maxDepth) {
+                bool wasProcessed = false;
+                {
+                  std::lock_guard<std::mutex> lock(processedMutex);
+                  wasProcessed = processed.find(synthesis.precursorApgcode) != processed.end();
+                }
+                
+                if (!wasProcessed) {
+                  auto dbIt = minPaths.find(synthesis.precursorApgcode);
+                  if (dbIt != minPaths.end()) {
+                    // Add directly to mini database as a seed
+                    {
+                      std::lock_guard<std::mutex> processedLock(processedMutex);
+                      processed.insert(synthesis.precursorApgcode);
+                      
+                      std::lock_guard<std::mutex> dbLock(miniDbMutex);
+                      miniDb.db[""].emplace_back(dbIt->second.cost, synthesis.precursorApgcode, ">>" + synthesis.precursorApgcode);
+                    }
+                    {
+                      std::lock_guard<std::mutex> lock(cerrMutex);
+                      std::cerr << "Found in database at max depth: " << synthesis.precursorApgcode << " cost " << dbIt->second.cost << std::endl;
+                    }
+                    
+                    // If accept-first is enabled, stop searching immediately
+                    if (acceptFirst) {
+                      {
+                        std::lock_guard<std::mutex> lock(cerrMutex);
+                        std::cerr << "Accept-first enabled: stopping search early after max-depth lookup" << std::endl;
+                      }
+                      shouldStop.store(true);
+                      searchQueue.shutdown();
+                      break;
+                    }
+                  }
+                }
+              } else {
+                // Get precursor population for priority queue
+                int precursorPop = synthesis.component.base.GetPop();
+                
+                // Add precursor to search queue with priority based on population
+                searchQueue.push({precursorPop, depth + 1, synthesis.precursorApgcode});
+              }
+            }
+            
+            if (shouldStop.load()) {
+              break;
+            }
+          }
+        } catch (const std::exception&) {
+          continue;
+        }
+        
+        if (shouldStop.load()) {
           break;
         }
       }
-
-      // Find synthesis steps and add to mini database
-      try {
-        LifeState targetPattern = LifeState::DecodeApgcode(currentApgcode);
-        auto orientations = targetPattern.SymmetryOrbit();
-
-        for (const LifeState &pattern : orientations) {
-          // If we're at the lowest depth, allow anything to be looked up in the database
-          int popLimit = depth == maxDepth - 1 ? std::numeric_limits<unsigned>::max() : maxPrecursorPop;
-
-          auto syntheses = FindSynthesisSteps(pattern, templates, minPaths, popLimit, false);
-
-          for (auto& synthesis : syntheses) {
-            // Filter out unpromising synthesis results
-            if (!IsPromising(synthesis)) {
-              continue;
-            }
-            synthesis.component.ShiftToFitTorus();
-            // Add synthesis to mini database
-            miniDb.db[synthesis.precursorApgcode].emplace_back(
-              synthesis.component.Cost(), 
-              synthesis.targetApgcode, 
-              synthesis.component.Realise().RLE()
-            );
-
-            // If we're at max depth, do database lookup immediately
-            if (depth + 1 >= maxDepth) {
-              if (processed.find(synthesis.precursorApgcode) == processed.end()) {
-                auto it = minPaths.find(synthesis.precursorApgcode);
-                if (it != minPaths.end()) {
-                  // Add directly to mini database as a seed
-                  processed.insert(synthesis.precursorApgcode);
-                  miniDb.db[""].emplace_back(it->second.cost, synthesis.precursorApgcode, ">>" + synthesis.precursorApgcode);
-                  std::cerr << "Found in database at max depth: " << synthesis.precursorApgcode << " cost " << it->second.cost << std::endl;
-                  
-                  // If accept-first is enabled, stop searching immediately
-                  if (acceptFirst) {
-                    std::cerr << "Accept-first enabled: stopping search early after max-depth lookup" << std::endl;
-                    goto search_complete;
-                  }
-                }
-              }
-            } else {
-              // Get precursor population for priority queue
-              int precursorPop = synthesis.component.base.GetPop();
-              
-              // Add precursor to search queue with priority based on population
-              searchQueue.push({precursorPop, depth + 1, synthesis.precursorApgcode});
-            }
-          }
-        }
-      } catch (const std::exception&) {
-        continue;
-      }
+      
+      // Unregister this thread from the queue
+      searchQueue.unregister_thread();
+    };
+    
+    // Create worker threads
+    std::vector<std::thread> workers;
+    for (int i = 0; i < numThreads; ++i) {
+      workers.emplace_back(workerLambda);
     }
     
-    search_complete:
+    // Wait for all workers to complete
+    for (auto& worker : workers) {
+      worker.join();
+    }
+    
     // Run Dijkstra on mini database to find optimal synthesis
     auto results = miniDb.Dijkstra();
     unsigned foundCost = std::numeric_limits<unsigned>::max();
@@ -596,6 +775,10 @@ int main(int argc, char* argv[]) {
     app.add_option("--max-precursor-pop", maxPrecursorPop, "Maximum population of precursor patterns")
         ->default_val(30);
     
+    int numThreads = 1;
+    app.add_option("--threads", numThreads, "Number of worker threads for parallel processing")
+        ->default_val(1);
+    
     unsigned minTemplateOccurrences = 1;
     app.add_option("--min-template-occurrences", minTemplateOccurrences, "Minimum times a template must occur to be used")
         ->default_val(1);
@@ -735,6 +918,7 @@ int main(int argc, char* argv[]) {
             maxPrecursorPop,
             skipExisting,
             acceptFirst,
+            numThreads,
             minTemplateOccurrences
         );
 
