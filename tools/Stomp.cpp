@@ -390,8 +390,10 @@ void TransferSynthesis::RunSynthesis(
   
   int successCount = 0;
   int improvedCount = 0;
+  int targetIndex = 0;
   
   for (const auto& target : filteredObjects) {
+    targetIndex++;
     // Determine target cost based on existing synthesis
     unsigned targetCost = std::numeric_limits<unsigned>::max();
     bool hasExisting = false;
@@ -402,11 +404,11 @@ void TransferSynthesis::RunSynthesis(
       hasExisting = true;
     }
     
-    std::cerr << "Searching for " << target;
+    std::cerr << "[" << targetIndex << "/" << filteredObjects.size() << "] Searching for " << target;
     if (hasExisting) {
-      std::cerr << " (trying to beat cost " << targetCost << ")...";
+      std::cerr << " (trying to beat cost " << targetCost << ")";
     } else {
-      std::cerr << " (new synthesis)...";
+      std::cerr << " (new synthesis)";
     }
     std::cerr << std::endl;
     
@@ -436,8 +438,12 @@ void TransferSynthesis::RunSynthesis(
     
     {
       std::lock_guard<std::mutex> lock(cerrMutex);
-      std::cerr << "Starting multithreaded search with " << numThreads << " threads" << std::endl;
+      std::cerr << "  Starting search with " << numThreads << " threads" << std::endl;
     }
+    
+    // Reset process count for this target
+    static std::atomic<int> processCount{0};
+    processCount.store(0);
     
     // Create worker lambda
     auto workerLambda = [&]() {
@@ -461,9 +467,12 @@ void TransferSynthesis::RunSynthesis(
           processed.insert(currentApgcode);
         }
         
-        {
+        // Only show verbose output for interesting cases or periodically
+        int currentCount = ++processCount;
+        if (depth < 2 || currentCount % 50 == 0) {
           std::lock_guard<std::mutex> lock(cerrMutex);
-          std::cerr << "Processing depth " << depth << ", pop " << population << ": " << currentApgcode << ", queue size: " << searchQueue.size() << std::endl;
+          std::string indent(2 + depth, ' '); // Base indent + 1 space per depth level
+          std::cerr << indent << "Processing depth " << depth << ", pop " << population << ", queue size " << searchQueue.size() << ": " << currentApgcode << std::endl;
         }
 
         // Skip max-depth patterns since database lookups are now done immediately
@@ -479,16 +488,17 @@ void TransferSynthesis::RunSynthesis(
             std::lock_guard<std::mutex> lock(miniDbMutex);
             miniDb.db[""].emplace_back(it->second.cost, currentApgcode, ">>" + currentApgcode);
           }
-          {
+          if (it->second.cost + depth <= targetCost) {
             std::lock_guard<std::mutex> lock(cerrMutex);
-            std::cerr << "Found in database: " << currentApgcode << " cost " << it->second.cost << std::endl;
+            std::string indent(2 + depth, ' ');
+            std::cerr << indent << "Found in database: " << currentApgcode << " (cost " << it->second.cost << ")" << std::endl;
           }
           
           // If accept-first is enabled and we found a synthesis, stop searching
           if (acceptFirst) {
             {
               std::lock_guard<std::mutex> lock(cerrMutex);
-              std::cerr << "Accept-first enabled: stopping search early" << std::endl;
+              std::cerr << "  Accept-first: stopping search early" << std::endl;
             }
             shouldStop.store(true);
             searchQueue.shutdown();
@@ -512,9 +522,9 @@ void TransferSynthesis::RunSynthesis(
               if (depth + 1 < maxDepth && !IsPromising(synthesis)) {
                 continue;
               }
+
               synthesis.component.ShiftToFitTorus();
-              // if(synthesis.component.base.GetPop() <= 30 && IsPromising(synthesis))
-              //   std::cout << synthesis.component.Realise() << std::endl;
+
               // Add synthesis to mini database
               {
                 std::lock_guard<std::mutex> lock(miniDbMutex);
@@ -544,16 +554,17 @@ void TransferSynthesis::RunSynthesis(
                       std::lock_guard<std::mutex> dbLock(miniDbMutex);
                       miniDb.db[""].emplace_back(dbIt->second.cost, synthesis.precursorApgcode, ">>" + synthesis.precursorApgcode);
                     }
-                    {
+                    if (dbIt->second.cost + depth <= targetCost) {
                       std::lock_guard<std::mutex> lock(cerrMutex);
-                      std::cerr << "Found in database at max depth: " << synthesis.precursorApgcode << " cost " << dbIt->second.cost << std::endl;
+                      std::string indent(2 + (depth + 1), ' '); // depth + 1 since this is a precursor
+                      std::cerr << indent << "Found at max depth: " << synthesis.precursorApgcode << " (cost " << dbIt->second.cost << ")" << std::endl;
                     }
                     
                     // If accept-first is enabled, stop searching immediately
                     if (acceptFirst) {
                       {
                         std::lock_guard<std::mutex> lock(cerrMutex);
-                        std::cerr << "Accept-first enabled: stopping search early after max-depth lookup" << std::endl;
+                        std::cerr << "  Accept-first: stopping after max-depth lookup" << std::endl;
                       }
                       shouldStop.store(true);
                       searchQueue.shutdown();
@@ -631,17 +642,14 @@ void TransferSynthesis::RunSynthesis(
       successCount++;
       if (hasExisting && foundCost < targetCost) {
         improvedCount++;
-        std::cerr << "✓ Improved synthesis for " << target 
-                  << " (cost " << targetCost << " → " << foundCost << ")" << std::endl;
+        std::cerr << "  ✓ Improved: cost " << targetCost << " → " << foundCost << std::endl;
       } else if (!hasExisting) {
-        std::cerr << "✓ Found new synthesis for " << target 
-                  << " (cost " << foundCost << ")" << std::endl;
+        std::cerr << "  ✓ New synthesis: cost " << foundCost << std::endl;
       } else {
-        std::cerr << "✗ No improvement found for " << target
-                  << " (keeping existing cost " << targetCost << ")" << std::endl;
+        std::cerr << "  = No improvement (cost " << targetCost << ")" << std::endl;
       }
     } else {
-      std::cerr << "✗ No synthesis found for " << target << std::endl;
+      std::cerr << "  ✗ No synthesis found" << std::endl;
     }
   }
   
@@ -770,12 +778,12 @@ std::vector<std::string> getMostExpensiveTargets(const std::unordered_map<std::s
 }
 
 int main(int argc, char* argv[]) {
-    CLI::App app{"Transfer synthesis tool"};
+    CLI::App app{"Stomp: synthesis transfer tool"};
     
     // Basic arguments
-    std::string transferPath;
+    std::string componentsPath;
 
-    app.add_option("transfer_path", transferPath, "Directory or file containing .sjk files for transfer templates")
+    app.add_option("components_path", componentsPath, "Directory or file containing .sjk files for component templates")
         ->required();
 
     // Options
@@ -785,7 +793,7 @@ int main(int argc, char* argv[]) {
     // Cost database option
     std::string costPath;
     auto cost_opt = app.add_option("--cost-db", costPath, 
-        "Directory or file containing cost database (defaults to transfer_path)");
+        "Directory or file containing cost database (defaults to components_path)");
     
     // Skip existing option
     bool skipExisting = false;
@@ -877,10 +885,10 @@ int main(int argc, char* argv[]) {
     
     try {
         // Get list of transfer component files
-        std::vector<std::string> transferComponentFiles = GetSJKFiles(transferPath);
+        std::vector<std::string> transferComponentFiles = GetSJKFiles(componentsPath);
         
         if (transferComponentFiles.empty()) {
-            std::cerr << "Error: No .sjk files found in transfer path " << transferPath << std::endl;
+            std::cerr << "Error: No .sjk files found in components path " << componentsPath << std::endl;
             return 1;
         }
         
@@ -888,8 +896,8 @@ int main(int argc, char* argv[]) {
             std::cout << "Found " << transferComponentFiles.size() << " transfer component files" << std::endl;
         }
         
-        // Set up cost database (use specified path or default to transfer path)
-        std::string actualCostPath = *cost_opt ? costPath : transferPath;
+        // Set up cost database (use specified path or default to component path)
+        std::string actualCostPath = *cost_opt ? costPath : componentsPath;
         
         if (verbose) {
             std::cerr << "Running Dijkstra's algorithm on " << actualCostPath << "..." << std::endl;
