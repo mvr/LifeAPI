@@ -134,9 +134,9 @@ public:
       bool skipExisting = false);
 
   // Check if a synthesis result is promising (filters out hopeless cases like distant blocks/tubs)
-  static bool IsSparse(const LifeState& state);
+  static bool IsSparse(const LifeState &state);
+  static bool IsSparse(const LifeState &state, const std::vector<LifeState> &components);
   static bool IsPromising(const SynthesisResult& synthesis);
-
 
   static void RunSynthesis(
       const std::vector<std::string> &transferComponentFiles,
@@ -237,25 +237,27 @@ std::vector<std::string> TransferSynthesis::FilterTargetObjects(
 }
 
 bool TransferSynthesis::IsSparse(const LifeState &state) {
-  auto components = state.StillComponents();
+  return IsSparse(state, state.StillComponents());
+}
 
+bool TransferSynthesis::IsSparse(const LifeState &state, const std::vector<LifeState> &components) {
   // Single component is not sparse
   if (components.size() <= 1) {
     return false;
   }
 
-  // Bounding box strategy: check if components are too distant
-  auto originalBounds = state.XYBounds();
-  int originalWidth = originalBounds[2] - originalBounds[0];
-  int originalHeight = originalBounds[3] - originalBounds[1];
-  int originalArea = originalWidth * originalHeight;
+  // // Bounding box strategy: check if components are too distant
+  // auto originalBounds = state.XYBounds();
+  // int originalWidth = originalBounds[2] - originalBounds[0];
+  // int originalHeight = originalBounds[3] - originalBounds[1];
+  // int originalArea = originalWidth * originalHeight;
 
-  // Density check: if pattern is too sparse overall, likely not promising
-  int population = state.GetPop();
-  double density = (double)population / originalArea;
-  if (density < 0.05) {
-    return true;
-  }
+  // // Density check: if pattern is too sparse overall, likely not promising
+  // int population = state.GetPop();
+  // double density = (double)population / originalArea;
+  // if (density < 0.05) {
+  //   return true;
+  // }
 
   LifeState largest;
   unsigned largest_pop = 0;
@@ -268,7 +270,12 @@ bool TransferSynthesis::IsSparse(const LifeState &state) {
     }
   }
 
-  if (!(state & ~largest.Convolve(LifeState::ConstantParse("7o$7o$7o$7o$7o$7o$7o!", -3, -3))).IsEmpty())
+  LifeState nearby = state.ComponentContaining(
+      state & largest.Convolve(
+                    LifeState::ConstantParse("7o$7o$7o$7o$7o$7o$7o!", -3, -3)),
+      LifeState::ConstantParse("5o$5o$5o$5o$5o!", -2, -2));
+
+  if (!(state & ~nearby).IsEmpty())
     return true;
 
   // ALSO OLD
@@ -317,21 +324,38 @@ bool TransferSynthesis::IsPromising(const SynthesisResult& synthesis) {
     return true;
   }
 
-  if (IsSparse(synthesis.component.base) &&
+  auto components = synthesis.component.base.StillComponents();
+
+  if (IsSparse(synthesis.component.base, components) &&
       IsSparse(synthesis.component.out)) {
     // std::cerr << "Unpromising density " << synthesis.precursorApgcode << std::endl;
 
     return false;
   }
 
-  // Steps that just shove a block or tub around are not promising
-  LifeState before = synthesis.component.base & ~synthesis.component.out;
-  bool beforeBlock = before.GetPop() == 4 && before.Stepped() == before;
-  LifeState after = ~synthesis.component.base & synthesis.component.out;
-  bool afterBlock = after.GetPop() == 4 && after.Stepped() == after;
+  LifeState largest;
+  unsigned largest_pop = 0;
 
-  if (beforeBlock && afterBlock)
-    return false;
+  for (const auto &component : components) {
+    unsigned pop = component.GetPop();
+    if (pop > largest_pop) {
+      largest = component;
+      largest_pop = pop;
+    }
+  }
+
+  // Steps that just shove a block, tub or boat around are not promising
+  if((largest & ~synthesis.component.out).IsEmpty()) {
+    LifeState diff = synthesis.component.base ^ synthesis.component.out;
+    LifeState before = synthesis.component.base.ComponentContaining(diff);
+    LifeState after = synthesis.component.out.ComponentContaining(diff);
+
+    bool beforeSmall = before.GetPop() <= 5 && before.Stepped() == before;
+    bool afterSmall = after.GetPop() <= 5 && after.Stepped() == after;
+
+    if (beforeSmall && afterSmall)
+      return false;
+  }
 
   return true;
 }
