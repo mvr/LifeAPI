@@ -16,12 +16,13 @@
 
 struct SearchResult {
   unsigned cost;
+  unsigned steps;
   std::string predecessor;
   std::string componentLine;
     
-  SearchResult() : cost(std::numeric_limits<double>::infinity()) {}
-  SearchResult(double c, const std::string& pred, const std::string& comp)
-    : cost(c), predecessor(pred), componentLine(comp) {}
+  SearchResult() : cost(std::numeric_limits<unsigned>::max()), steps(0) {}
+  SearchResult(double c, unsigned s, const std::string& pred, const std::string& comp)
+    : cost(c), steps(s), predecessor(pred), componentLine(comp) {}
 };
 
 class ComponentDatabase {
@@ -32,10 +33,6 @@ public:
   void LoadFromFile(const std::string& filePath, bool verbose = false);
   std::unordered_map<std::string, SearchResult> Dijkstra(const std::string& seed = "") const;
   
-  std::vector<ComponentTemplate> LoadComponentTemplates(bool verbose = false, unsigned minOccurrences = 1) const;
-  
-  // Filter function to determine if a component is useful for synthesis
-  static bool IsUsefulComponent(const Component& comp);
 };
 
 void ComponentDatabase::LoadFromFiles(const std::vector<std::string>& filePaths, bool verbose) {
@@ -85,7 +82,7 @@ std::unordered_map<std::string, SearchResult> ComponentDatabase::Dijkstra(const 
   std::priority_queue<PriorityItem, std::vector<PriorityItem>, std::greater<PriorityItem>> pq;
     
   std::unordered_map<std::string, SearchResult> result;
-  result[seed] = SearchResult(0.0, "", "");
+  result[seed] = SearchResult(0.0, 0, "", "");
   pq.emplace(0.0, seed);
     
   while (!pq.empty()) {
@@ -99,14 +96,16 @@ std::unordered_map<std::string, SearchResult> ComponentDatabase::Dijkstra(const 
         
     for (const auto& [cost, outStr, compLine] : it->second) {
       double newDist = dist + cost;
+      unsigned newSteps = result[curr].steps + 1;
             
       auto resultIt = result.find(outStr);
       if (resultIt == result.end() ||
           newDist < resultIt->second.cost ||
-          (newDist == resultIt->second.cost && compLine < resultIt->second.componentLine)) {
+          (newDist == resultIt->second.cost && newSteps > resultIt->second.steps) ||
+          (newDist == resultIt->second.cost && newSteps == resultIt->second.steps && compLine < resultIt->second.componentLine)) {
                 
         pq.emplace(newDist, outStr);
-        result[outStr] = SearchResult(newDist, curr, compLine);
+        result[outStr] = SearchResult(newDist, newSteps, curr, compLine);
       }
     }
   }
