@@ -140,9 +140,9 @@ std::string ComponentTemplate::RLE() const {
   // LifeHistory history(base | gliderSet.Realise(), LifeState(), marked, original);
   // return history.RLEWHeader();
 
-  LifeState marked = out;
-  LifeState original = base & out;
-  marked &= ~original;
-  LifeHistory history(base | out | gliderSet.Realise(), LifeState(), marked, original);
+  // LifeState marked = out;
+  // LifeState original = base & out;
+  // marked &= ~original;
+  LifeHistory history(base | gliderSet.Realise(), LifeState(), out);
   return history.RLEWHeader();
 }

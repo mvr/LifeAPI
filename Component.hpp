@@ -523,13 +523,13 @@ Component Component::FromSJK(const std::string& compStr) {
     if (result.out == prev)
       done = true;
     if (gen > 200)
-      throw std::runtime_error("Component took too long");
+      throw std::runtime_error("Component " + (result.base | result.gliderSet.Realise()).RLE() + " took too long");
   }
 
   // Double-check that we got the right output
   // (Torus wrap means we might not)
   if (result.out.EncodeApgcode() != outData)
-    throw std::runtime_error("Component gave the wrong result");
+    throw std::runtime_error("Component " + (result.base | result.gliderSet.Realise()).RLE() + " gave the wrong result");
 
   return result;
 }

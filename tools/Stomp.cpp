@@ -654,7 +654,7 @@ void TransferSynthesis::RunSynthesis(
   }
   
   std::cerr << "Synthesis complete: " << successCount << "/" << filteredObjects.size() 
-            << " targets processed";
+            << " targets synthesised";
   if (improvedCount > 0) {
     std::cerr << " (" << improvedCount << " improved)";
   }
