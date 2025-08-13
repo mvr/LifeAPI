@@ -25,6 +25,11 @@ public:
   // TODO: It is dumb to be recomputing this each time
   unsigned Cost() const { return (se.GetPop() + sw.GetPop() + nw.GetPop() + ne.GetPop())/5; }
 
+  inline GliderSet operator|(const GliderSet& other) const;
+  inline bool operator==(const GliderSet& other) const;
+
+  inline uint64_t GetHash() const;
+
   inline LifeState Realise() const;
 
   inline GliderSet Stepped(int n) const;
@@ -52,7 +57,6 @@ struct Component {
 
   inline LifeState Realise() const;
 
-
   inline static Component FromSJK(const std::string& compStr);
   inline std::string ToSJK() const;
   inline std::string RLE() const;
@@ -67,6 +71,22 @@ struct Component {
 
 GliderSet::GliderSet(const LifeState& se, const LifeState& sw, const LifeState& nw, const LifeState& ne) 
   : se(se), sw(sw), nw(nw), ne(ne) {
+}
+
+GliderSet GliderSet::operator|(const GliderSet& other) const {
+  return GliderSet(se | other.se, sw | other.sw, nw | other.nw, ne | other.ne);
+}
+
+bool GliderSet::operator==(const GliderSet& other) const {
+  return se == other.se && sw == other.sw && nw == other.nw && ne == other.ne;
+}
+
+uint64_t GliderSet::GetHash() const {
+  uint64_t hash = se.GetHash();
+  hash = combine_hashes(hash, sw.GetHash());
+  hash = combine_hashes(hash, nw.GetHash());
+  hash = combine_hashes(hash, ne.GetHash());
+  return hash;
 }
 
 LifeState GliderSet::Realise() const {
