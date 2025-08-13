@@ -17,6 +17,7 @@
 #include "../Component.hpp"
 #include "../ComponentTemplate.hpp"
 #include "ComponentDatabase.hpp"
+#include "TemplateCache.hpp"
 #include "CLI11/include/CLI/CLI.hpp"
 
 template<typename T>
@@ -147,7 +148,9 @@ public:
       bool skipExisting = false,
       bool acceptFirst = false,
       int numThreads = 1,
-      unsigned minTemplateOccurrences = 1);
+      unsigned minTemplateOccurrences = 1,
+      const std::string& cacheDir = "./template_cache",
+      bool useCache = true);
 
 private:
   using QueueEntry = std::tuple<int, int, std::string>; // population, depth, apgcode
@@ -370,12 +373,14 @@ void TransferSynthesis::RunSynthesis(
     bool skipExisting,
     bool acceptFirst,
     int numThreads,
-    unsigned minTemplateOccurrences) {
+    unsigned minTemplateOccurrences,
+    const std::string& cacheDir,
+    bool useCache) {
 
-  // Load component templates
-  ComponentDatabase db;
-  db.LoadFromFiles(transferComponentFiles, true);
-  std::vector<ComponentTemplate> templates = db.LoadComponentTemplates(true, minTemplateOccurrences);
+  // Load component templates using cache
+  TemplateCache templateCache;
+  std::vector<ComponentTemplate> templates = templateCache.LoadTemplates(
+    transferComponentFiles, true, minTemplateOccurrences, cacheDir, useCache);
 
   // Filter target objects
   std::vector<std::string> filteredObjects = FilterTargetObjects(objects, minPaths, skipExisting);
@@ -817,6 +822,17 @@ int main(int argc, char* argv[]) {
     app.add_option("--min-template-occurrences", minTemplateOccurrences, "Minimum times a template must occur to be used")
         ->default_val(1);
     
+    // Template caching options
+    std::string cacheDir = "./template_cache";
+    app.add_option("--cache-dir", cacheDir, "Directory for template cache")
+        ->default_val("./template_cache");
+    
+    bool noCache = false;
+    app.add_flag("--no-cache", noCache, "Disable template caching");
+    
+    bool clearCache = false;
+    app.add_flag("--clear-cache", clearCache, "Clear template cache and exit");
+    
     // Mutually exclusive target selection
     auto target_group = app.add_option_group("target_selection", "Target selection (exactly one required)");
     
@@ -888,6 +904,18 @@ int main(int argc, char* argv[]) {
     }
     
     try {
+        // Handle clear cache option
+        if (clearCache) {
+            TemplateCache cache;
+            if (cache.ClearCache(cacheDir)) {
+                std::cerr << "Template cache cleared: " << cacheDir << std::endl;
+            } else {
+                std::cerr << "Failed to clear template cache: " << cacheDir << std::endl;
+                return 1;
+            }
+            return 0;
+        }
+        
         // Get list of transfer component files
         std::vector<std::string> transferComponentFiles = GetSJKFiles(componentsPath);
         
@@ -960,7 +988,9 @@ int main(int argc, char* argv[]) {
             skipExisting,
             acceptFirst,
             numThreads,
-            minTemplateOccurrences
+            minTemplateOccurrences,
+            cacheDir,
+            !noCache
         );
 
     } catch (const std::exception& e) {
