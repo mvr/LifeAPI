@@ -824,6 +824,10 @@ int main(int argc, char* argv[]) {
     target_group->add_option("--target-file", targetFile,
         "File containing target apgcodes (one per line)");
     
+    std::string singleTarget;
+    target_group->add_option("--target", singleTarget,
+        "Single target apgcode to synthesize");
+    
     int expensiveCount = 1000;
     auto expensive_opt = target_group->add_option("--most-expensive", expensiveCount,
         "Target the N most expensive syntheses of each population class")
@@ -925,6 +929,9 @@ int main(int argc, char* argv[]) {
             }
             
             targets = getMostExpensiveTargets(dijkstraResults, expensiveCount, minPopulation, maxPopulation, specificPopulation, includePseudo, verbose);
+        } else if (!singleTarget.empty()) {
+            // Single target specified
+            targets.push_back(singleTarget);
         } else {
             // Read targets from file
             targets = readTargetFile(targetFile);
