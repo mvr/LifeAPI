@@ -95,6 +95,8 @@ std::unordered_map<std::string, SearchResult> ComponentDatabase::Dijkstra(const 
     if (it == db.end()) continue;
         
     for (const auto& [cost, outStr, compLine] : it->second) {
+      if(curr == outStr) continue;
+
       double newDist = dist + cost;
       unsigned newSteps = result[curr].steps + 1;
             
