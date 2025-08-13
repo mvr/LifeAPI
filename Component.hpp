@@ -292,7 +292,7 @@ bool Component::SanityCheck() const {
   for (int step = 0; step < maxRewindSteps; step++) {
     rewoundGliders = rewoundGliders.Rewind(rewindStep);
     totalRewind += rewindStep;
-
+    if(step == 0) continue;
     // Check that each individual salvo is outside the base pattern bounding box
     bool allSalvosOutside = true;
 
@@ -318,6 +318,74 @@ bool Component::SanityCheck() const {
 
   if (rewoundComp.Realise().Stepped(totalRewind) != Realise())
     return false;
+
+  // Check that each salvo can get there without colliding with the base
+  const int minDistance = 1; // Minimum gap between gliders and base
+  
+  // SE gliders should be north or west of base
+  if (!rewoundGliders.se.IsEmpty()) {
+    unsigned seRewind = 0;
+    LifeState startingSE = rewoundGliders.se;
+    for (int step = 0; step < maxRewindSteps; step++) {
+      auto [sMinX, sMinY, sMaxX, sMaxY] = rewoundGliders.se.XYBounds();
+      if (sMaxY < minY - minDistance || sMaxX < minX - minDistance) {
+        break;
+      }
+      rewoundGliders.se = rewoundGliders.Rewind(rewindStep).se;
+      seRewind += rewindStep;
+    }
+    if (seRewind > 0 && (rewoundGliders.se | base).Stepped(seRewind) != (startingSE | base))
+      return false;
+  }
+
+  // SW gliders should be north or east of base
+  if (!rewoundGliders.sw.IsEmpty()) {
+    unsigned swRewind = 0;
+    LifeState startingSW = rewoundGliders.sw;
+    for (int step = 0; step < maxRewindSteps; step++) {
+      auto [sMinX, sMinY, sMaxX, sMaxY] = rewoundGliders.sw.XYBounds();
+      if (sMaxY < minY - minDistance || sMinX > maxX + minDistance) {
+        break;
+      }
+      rewoundGliders.sw = rewoundGliders.Rewind(rewindStep).sw;
+      swRewind += rewindStep;
+    }
+    if (swRewind > 0 && (rewoundGliders.sw | base).Stepped(swRewind) != (startingSW | base))
+      return false;
+  }
+
+  // NW gliders should be south or east of base
+  if (!rewoundGliders.nw.IsEmpty()) {
+    unsigned nwRewind = 0;
+    LifeState startingNW = rewoundGliders.nw;
+    for (int step = 0; step < maxRewindSteps; step++) {
+      auto [sMinX, sMinY, sMaxX, sMaxY] = rewoundGliders.nw.XYBounds();
+      if (sMinY > maxY + minDistance || sMinX > maxX + minDistance) {
+        break;
+      }
+      rewoundGliders.nw = rewoundGliders.Rewind(rewindStep).nw;
+      nwRewind += rewindStep;
+    }
+    if (nwRewind > 0 && (rewoundGliders.nw | base).Stepped(nwRewind) != (startingNW | base))
+      return false;
+  }
+
+  // NE gliders should be south or west of base
+  if (!rewoundGliders.ne.IsEmpty()) {
+    unsigned neRewind = 0;
+    LifeState startingNE = rewoundGliders.ne;
+    for (int step = 0; step < maxRewindSteps; step++) {
+      auto [sMinX, sMinY, sMaxX, sMaxY] = rewoundGliders.ne.XYBounds();
+      if (sMinY > maxY + minDistance || sMaxX < minX - minDistance) {
+        break;
+      }
+      rewoundGliders.ne = rewoundGliders.Rewind(rewindStep).ne;
+      neRewind += rewindStep;
+    }
+    if (neRewind > 0 && (rewoundGliders.ne | base).Stepped(neRewind) != (startingNE | base))
+      return false;
+  }
+
 
   // TODO: Torus wrap?
 
