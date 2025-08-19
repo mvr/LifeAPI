@@ -147,6 +147,7 @@ public:
       bool acceptFirst = false,
       int numThreads = 1,
       unsigned minTemplateOccurrences = 1,
+      bool outputVisitedApgcodes = false,
       const std::string& cacheDir = "./template_cache",
       bool useCache = true);
 
@@ -358,6 +359,7 @@ void TransferSynthesis::RunSynthesis(
     bool acceptFirst,
     int numThreads,
     unsigned minTemplateOccurrences,
+    bool outputVisitedApgcodes,
     const std::string& cacheDir,
     bool useCache) {
 
@@ -414,6 +416,10 @@ void TransferSynthesis::RunSynthesis(
     std::mutex cerrMutex;
     std::atomic<bool> shouldStop{false};
     
+    // Collection for all queue apgcodes (if enabled)
+    std::unordered_set<std::string> allVisitedApgcodes;
+    std::mutex visitedApgcodesMutex;
+    
     // Get population of target
     int targetPop = 0;
     try {
@@ -446,7 +452,13 @@ void TransferSynthesis::RunSynthesis(
         }
         
         auto [population, depth, currentApgcode] = entry;
-        
+
+        // Collect apgcode if output is enabled
+        if (outputVisitedApgcodes) {
+          std::lock_guard<std::mutex> lock(visitedApgcodesMutex);
+          allVisitedApgcodes.insert(currentApgcode);
+        }
+
         // Check if already processed
         {
           std::lock_guard<std::mutex> lock(processedMutex);
@@ -528,6 +540,10 @@ void TransferSynthesis::RunSynthesis(
 
               // If we're at max depth, do database lookup immediately
               if (depth + 1 >= maxDepth) {
+                if (outputVisitedApgcodes) {
+                  std::lock_guard<std::mutex> lock(visitedApgcodesMutex);
+                  allVisitedApgcodes.insert(synthesis.precursorApgcode);
+                }
                 bool wasProcessed = false;
                 {
                   std::lock_guard<std::mutex> lock(processedMutex);
@@ -641,6 +657,13 @@ void TransferSynthesis::RunSynthesis(
       }
     } else {
       std::cerr << "  ✗ No synthesis found" << std::endl;
+    }
+    
+    if (outputVisitedApgcodes) {
+      std::cerr << "Queue apgcodes for " << target << ":" << std::endl;
+      for (const auto& apgcode : allVisitedApgcodes) {
+        std::cout << apgcode << std::endl;
+      }
     }
   }
   
@@ -807,7 +830,10 @@ int main(int argc, char* argv[]) {
     unsigned minTemplateOccurrences = 1;
     app.add_option("--min-template-occurrences", minTemplateOccurrences, "Minimum times a template must occur to be used")
         ->default_val(1);
-    
+
+    bool outputVisitedApgcodes = false;
+    app.add_flag("--output-visited-apgcodes", outputVisitedApgcodes, "Output all apgcodes that were ever processed in the search queue");
+
     // Template caching options
     std::string cacheDir = "./template_cache";
     app.add_option("--cache-dir", cacheDir, "Directory for template cache")
@@ -975,6 +1001,7 @@ int main(int argc, char* argv[]) {
             acceptFirst,
             numThreads,
             minTemplateOccurrences,
+            outputVisitedApgcodes,
             cacheDir,
             !noCache
         );
