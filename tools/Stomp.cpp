@@ -312,34 +312,46 @@ bool TransferSynthesis::IsPromising(const SynthesisResult& synthesis) {
     return true;
   }
 
-  auto components = synthesis.component.base.StillComponents();
+  auto base_components = synthesis.component.base.StillComponents();
+  auto out_components = synthesis.component.out.StillComponents();
 
-  if (IsSparse(synthesis.component.base, components) &&
-      IsSparse(synthesis.component.out)) {
+  if (IsSparse(synthesis.component.base, base_components) &&
+      IsSparse(synthesis.component.out, out_components)) {
     // std::cerr << "Unpromising density " << synthesis.precursorApgcode << std::endl;
 
     return false;
   }
 
-  LifeState largest;
-  unsigned largest_pop = 0;
+  LifeState base_largest;
+  unsigned base_largest_pop = 0;
 
-  for (const auto &component : components) {
+  for (const auto &component : base_components) {
     unsigned pop = component.GetPop();
-    if (pop > largest_pop) {
-      largest = component;
-      largest_pop = pop;
+    if (pop > base_largest_pop) {
+      base_largest = component;
+      base_largest_pop = pop;
     }
   }
 
-  // Steps that just shove a block, tub or boat around are not promising
-  if((largest & ~synthesis.component.out).IsEmpty()) {
-    LifeState diff = synthesis.component.base ^ synthesis.component.out;
-    LifeState before = synthesis.component.base.ComponentContaining(diff);
-    LifeState after = synthesis.component.out.ComponentContaining(diff);
+  // Steps that interact with the largest component without touching
+  // any smaller ones are not promising
+  if (base_components.size() > 1 && !((synthesis.component.base ^ synthesis.component.out) & synthesis.component.base.ZOI()).IsEmpty()) {
+    LifeState smaller_components = synthesis.component.base & ~base_largest;
+    if ((smaller_components & ~synthesis.component.out).IsEmpty())
+      return false;
+  }
 
-    bool beforeSmall = before.GetPop() <= 5 && before.Stepped() == before;
-    bool afterSmall = after.GetPop() <= 5 && after.Stepped() == after;
+  // Steps that just shove a small still life around are not promising
+  if((base_largest & ~synthesis.component.out).IsEmpty()) {
+    LifeState diff = (synthesis.component.base ^ synthesis.component.out).ZOI();
+    LifeState before = synthesis.component.base.ComponentContaining(diff & synthesis.component.base);
+    LifeState after = synthesis.component.out.ComponentContaining(diff & synthesis.component.out);
+
+    // bool beforeSmall = before.GetPop() <= 8 && before.Stepped() == before;
+    // bool afterSmall = after.GetPop() <= 8 && after.Stepped() == after;
+
+    bool beforeSmall = before.Stepped() == before;
+    bool afterSmall = after.Stepped() == after;
 
     if (beforeSmall && afterSmall)
       return false;
