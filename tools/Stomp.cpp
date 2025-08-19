@@ -124,9 +124,7 @@ public:
   static std::vector<SynthesisResult> FindSynthesisSteps(
       const LifeState &targetPattern,
       const std::vector<ComponentTemplate> &templates,
-      const std::unordered_map<std::string, SearchResult> &minPaths,
-      int maxPrecursorPop = std::numeric_limits<int>::max(),
-      bool onlyImprovements = true);
+      const std::unordered_map<std::string, SearchResult> &minPaths);
 
   // Filter target objects, optionally skipping those with existing synthesis paths
   static std::vector<std::string> FilterTargetObjects(
@@ -159,9 +157,7 @@ private:
 std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesisSteps(
     const LifeState& targetPattern,
     const std::vector<ComponentTemplate>& templates,
-    const std::unordered_map<std::string, SearchResult>& minPaths,
-    int maxPrecursorPop,
-    bool onlyImprovements) {
+    const std::unordered_map<std::string, SearchResult>& minPaths) {
 
   std::vector<SynthesisResult> results;
   std::string targetApgcode = targetPattern.EncodeApgcode();
@@ -180,25 +176,13 @@ std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesis
         resultComp.base = (targetPattern & ~transformedOut) | transformedBase;
         resultComp.gliderSet = templ.gliderSet.Moved({x, y});
         resultComp.out = targetPattern;
-        
-        if (!resultComp.SanityCheck()) continue;
 
-        if (resultComp.base.GetPop() > maxPrecursorPop)
-          continue;
+        resultComp.ShiftToFitTorus();
+
+        if (!resultComp.SanityCheck()) continue;
 
         std::string precursorApgcode = resultComp.base.EncodeApgcode();
 
-        if (onlyImprovements) {
-          auto outputIt = minPaths.find(targetApgcode);
-          bool newOutput = outputIt == minPaths.end();
-          // if (newOutput) continue;
-
-          auto inputIt = minPaths.find(precursorApgcode);
-          if (inputIt == minPaths.end()) continue;
-          if (!newOutput && inputIt->second.cost + resultComp.Cost() >= outputIt->second.cost)
-            continue;
-        }
-        
         results.emplace_back(resultComp, precursorApgcode, targetApgcode);
       } catch (const std::exception&) {
         continue;
@@ -436,7 +420,7 @@ void TransferSynthesis::RunSynthesis(
       LifeState targetPattern = LifeState::DecodeApgcode(target);
       targetPop = targetPattern.GetPop();
     } catch (const std::exception&) {
-      targetPop = 999; // Fallback for unparseable patterns
+      continue;
     }
     
     searchQueue.push({targetPop, 0, target});
@@ -517,12 +501,14 @@ void TransferSynthesis::RunSynthesis(
           auto orientations = targetPattern.SymmetryOrbit();
 
           for (const LifeState &pattern : orientations) {
-            // If we're at the lowest depth, allow anything to be looked up in the database
-            int popLimit = depth == maxDepth - 1 ? std::numeric_limits<unsigned>::max() : maxPrecursorPop;
-
-            auto syntheses = FindSynthesisSteps(pattern, templates, minPaths, popLimit, false);
+            auto syntheses = FindSynthesisSteps(pattern, templates, minPaths);
 
             for (auto& synthesis : syntheses) {
+              // If we're at the lowest depth, allow anything to be looked up in the database
+              int maxPop = depth == maxDepth - 1 ? std::numeric_limits<int>::max() : maxPrecursorPop;
+              if (synthesis.component.base.GetPop() > maxPop)
+                continue;
+
               // Filter out unpromising synthesis results
               if (depth + 1 < maxDepth && !IsPromising(synthesis)) {
                 continue;
