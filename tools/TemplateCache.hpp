@@ -528,7 +528,9 @@ void TemplateCache::SaveTemplatesToCache(const std::string& cacheFile, const std
 bool TemplateCache::IsUsefulComponent(const Component &comp) {
   // We can't handle pure cleanup steps
   if ((comp.out & ~comp.base).IsEmpty()) {
-    return false;
+    LifeState deletion = comp.base & ~comp.out;
+    if(deletion == comp.base.StillComponentContaining(deletion))
+      return false;
   }
 
   // Filter out components where all input still lifes are small
