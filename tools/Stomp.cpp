@@ -120,11 +120,12 @@ public:
       : component(comp), precursorApgcode(precursor), targetApgcode(target), valid(true) {}
   };
 
-  // Find all possible synthesis steps for a given pattern
-  static std::vector<SynthesisResult> FindSynthesisSteps(
-      const LifeState &targetPattern,
-      const std::vector<ComponentTemplate> &templates,
-      const std::unordered_map<std::string, SearchResult> &minPaths);
+  static std::vector<std::string> ReadTargetFile(const std::string& filename);
+
+  static std::vector<std::string> GetMostExpensiveTargets(
+      const std::unordered_map<std::string, SearchResult>& dijkstraResults,
+      int countPerClass, int minPopulation, int maxPopulation, int specificPopulation,
+      bool includePseudo, bool verbose);
 
   // Filter target objects, optionally skipping those with existing synthesis paths
   static std::vector<std::string> FilterTargetObjects(
@@ -136,6 +137,12 @@ public:
   static bool IsSparse(const LifeState &state);
   static bool IsSparse(const LifeState &state, const std::vector<LifeState> &components);
   static bool IsPromising(const SynthesisResult& synthesis);
+
+  // Find all possible synthesis steps for a given pattern
+  static std::vector<SynthesisResult> FindSynthesisSteps(
+      const LifeState &targetPattern,
+      const std::vector<ComponentTemplate> &templates,
+      const std::unordered_map<std::string, SearchResult> &minPaths);
 
   static void RunSynthesis(
       const std::vector<std::string> &transferComponentFiles,
@@ -424,22 +431,15 @@ void TransferSynthesis::RunSynthesis(
   std::vector<ComponentTemplate> templates = templateCache.LoadTemplates(
     transferComponentFiles, true, minTemplateOccurrences, cacheDir, useCache);
 
-  // Filter target objects
-  std::vector<std::string> filteredObjects = FilterTargetObjects(objects, minPaths, skipExisting);
-
   // Build mini synthesis database using ComponentDatabase
   ComponentDatabase miniDb;
-  
-  // Process each target object
-  std::cerr << "Starting synthesis search (max depth: " << maxDepth 
-            << ", max precursor pop: " << maxPrecursorPop << ")" << std::endl;
-  std::cerr << "Processing " << filteredObjects.size() << " target objects" << std::endl;
-  
+  // std::unordered_set<std::string> processed;
+
   int successCount = 0;
   int improvedCount = 0;
   int targetIndex = 0;
   
-  for (const auto& target : filteredObjects) {
+  for (const auto& target : objects) {
     targetIndex++;
     // Determine target cost based on existing synthesis
     unsigned targetCost = std::numeric_limits<unsigned>::max();
@@ -451,7 +451,7 @@ void TransferSynthesis::RunSynthesis(
       hasExisting = true;
     }
     
-    std::cerr << "[" << targetIndex << "/" << filteredObjects.size() << "] Searching for " << target;
+    std::cerr << "[" << targetIndex << "/" << objects.size() << "] Searching for " << target;
     if (hasExisting) {
       std::cerr << " (trying to beat cost " << targetCost << ")";
     } else {
@@ -575,7 +575,7 @@ void TransferSynthesis::RunSynthesis(
     }
   }
   
-  std::cerr << "Synthesis complete: " << successCount << "/" << filteredObjects.size() 
+  std::cerr << "Synthesis complete: " << successCount << "/" << objects.size()
             << " targets synthesised";
   if (improvedCount > 0) {
     std::cerr << " (" << improvedCount << " improved)";
@@ -792,7 +792,7 @@ void TransferSynthesis::AddDatabasePrecursors(
 }
 
 
-std::vector<std::string> readTargetFile(const std::string& filename) {
+std::vector<std::string> TransferSynthesis::ReadTargetFile(const std::string& filename) {
     std::vector<std::string> targets;
     std::ifstream file(filename);
     
@@ -820,7 +820,7 @@ std::vector<std::string> readTargetFile(const std::string& filename) {
     return targets;
 }
 
-std::vector<std::string> getMostExpensiveTargets(const std::unordered_map<std::string, SearchResult>& dijkstraResults, int countPerClass, int minPopulation, int maxPopulation, int specificPopulation, bool includePseudo, bool verbose) {
+std::vector<std::string> TransferSynthesis::GetMostExpensiveTargets(const std::unordered_map<std::string, SearchResult>& dijkstraResults, int countPerClass, int minPopulation, int maxPopulation, int specificPopulation, bool includePseudo, bool verbose) {
     // Group patterns by population, tracking their Dijkstra cost
     std::unordered_map<int, std::vector<std::pair<unsigned, std::string>>> byPopulation;
     
@@ -1083,22 +1083,22 @@ int main(int argc, char* argv[]) {
           }
 
           // Get target objects based on mode
-
+          std::vector<std::string> unfilteredTargets;
           if (*expensive_opt) {
             if (verbose) {
               std::cerr << "Finding most expensive targets from Dijkstra results..." << std::endl;
             }
 
-            targets = getMostExpensiveTargets(dijkstraResults, expensiveCount, minPopulation, maxPopulation, specificPopulation, includePseudo, verbose);
+            unfilteredTargets = TransferSynthesis::GetMostExpensiveTargets(dijkstraResults, expensiveCount, minPopulation, maxPopulation, specificPopulation, includePseudo, verbose);
           } else if (!singleTarget.empty()) {
             // Single target specified
-            targets.push_back(singleTarget);
+            unfilteredTargets.push_back(singleTarget);
           } else {
             // Read targets from file
-            targets = readTargetFile(targetFile);
+            unfilteredTargets = TransferSynthesis::ReadTargetFile(targetFile);
           }
 
-          if (targets.empty()) {
+          if (unfilteredTargets.empty()) {
             std::cerr << "Error: No targets found" << std::endl;
             return 1;
           }
@@ -1107,9 +1107,23 @@ int main(int argc, char* argv[]) {
             std::cerr << "Loaded " << targets.size() << " target objects" << std::endl;
           }
 
+          // Filter target objects
+          targets = TransferSynthesis::FilterTargetObjects(unfilteredTargets, dijkstraResults, skipExisting);
+
+          // Now safe to trim the minPaths to save memory
+          for (auto it = dijkstraResults.begin(); it != dijkstraResults.end();) {
+            const std::string& key = it->first;
+            const std::string& predecessor = it->second.predecessor;
+
+            if ((key.length() < 2 || key.substr(0, 2) != "xs") ||
+                (!predecessor.empty() && predecessor.length() >= 2 && predecessor.substr(0, 2) != "xs")) {
+              it = dijkstraResults.erase(it);
+            } else {
+              ++it;
+            }
+          }
 
           // Build reverse lookup map: target apgcode -> vector of precursors from cost database
-
           std::unordered_set<std::string> targetSet(targets.begin(), targets.end());
 
           if (verbose) {
@@ -1134,10 +1148,9 @@ int main(int argc, char* argv[]) {
           }
         }
 
-        // Run synthesis
-        if (verbose) {
-            std::cout << "Starting synthesis..." << std::endl;
-        }
+        std::cerr << "Starting synthesis search (max depth: " << maxDepth
+                  << ", max precursor pop: " << maxPrecursorPop << ")" << std::endl;
+        std::cerr << "Processing " << targets.size() << " target objects" << std::endl;
 
         TransferSynthesis::RunSynthesis(
             transferComponentFiles,
