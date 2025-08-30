@@ -65,7 +65,7 @@ std::string GenericRLE(auto&& cellchar, bool flushtrailing = false) {
   return result.str();
 }
 
-inline std::string RowRLE(std::vector<LifeState> &row, bool flushtrailing = false) {
+inline std::string RowRLE(std::vector<LifeState> &row, bool flushtrailing = false, unsigned rowgap = 0) {
   const unsigned spacing = 84;
 
   std::stringstream result;
@@ -129,14 +129,12 @@ inline std::string RowRLE(std::vector<LifeState> &row, bool flushtrailing = fals
   // Flush trailing linefeeds
   if (flushtrailing && eol_count > 0) {
     if (eol_count > 1)
-      result << eol_count;
+      result << eol_count + rowgap;
 
     result << "$";
-
-    eol_count = 0;
+  } else {
+    result << "!";
   }
-
-  result << "!";
 
   return result.str();
 }
