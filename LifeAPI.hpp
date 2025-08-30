@@ -691,6 +691,14 @@ struct __attribute__((aligned(64))) LifeState {
     return cs;
   }
 
+  LifeState StillComponentContaining(const LifeState &seed) const {
+    LifeState out1, out2, outMore;
+    InteractionCounts(out1, out2, outMore);
+    const LifeState stillzoi = LifeState::ConstantParse("2bo$b3o$5o$b3o$2bo!", -2, -2);
+    auto c = (*this | outMore).ComponentContaining(seed, stillzoi);
+    return c & *this;
+  }
+
 private:
   bool IsPseudoStillLifeHelper(const std::vector<LifeState>& components, bool topLevel) const {
     if (components.empty()) return true;
