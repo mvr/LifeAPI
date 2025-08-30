@@ -290,9 +290,6 @@ bool Component::SanityCheck() const {
   const int maxRewindSteps = 20; // Safety limit
 
   for (int step = 0; step < maxRewindSteps; step++) {
-    rewoundGliders = rewoundGliders.Rewind(rewindStep);
-    totalRewind += rewindStep;
-    if(step == 0) continue;
     // Check that each individual salvo is outside the base pattern bounding box
     bool allSalvosOutside = true;
 
@@ -309,6 +306,9 @@ bool Component::SanityCheck() const {
     if (allSalvosOutside) {
       break;
     }
+
+    rewoundGliders = rewoundGliders.Rewind(rewindStep);
+    totalRewind += rewindStep;
   }
 
   Component rewoundComp;
@@ -316,8 +316,9 @@ bool Component::SanityCheck() const {
   rewoundComp.gliderSet = rewoundGliders;
   rewoundComp.out = out;
 
-  if (rewoundComp.Realise().Stepped(totalRewind) != Realise())
+  if (rewoundComp.Realise().Stepped(totalRewind) != Realise()) {
     return false;
+  }
 
   // Check that each salvo can get there without colliding with the base
   const int minDistance = 1; // Minimum gap between gliders and base
