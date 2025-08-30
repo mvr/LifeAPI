@@ -36,25 +36,28 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
 
   NeighbourCount startCount(state);
   LifeState everDifferentNeighbours;
+  LifeState everMoreThanOne;
 
   unsigned gen = 0;
 
   bool done = false;
   while (!done) {
     LifeState prev = state;
+    NeighbourCount count(state);
 
     everActive |= state ^ component.base;
-    everDifferentNeighbours |= NeighbourCount(state).Difference(startCount);
+    everDifferentNeighbours |= count.Difference(startCount);
+    everMoreThanOne |= count.bit1 | count.bit2 | count.bit3;
 
     state.Step();
     gen++;
     if (state == prev)
       done = true;
-    if (gen > 200)
+    if (gen > 300)
       throw std::runtime_error("Component took too long");
   }
 
-  LifeState relevant = everActive.ZOI() & everDifferentNeighbours;
+  LifeState relevant = everActive.ZOI() & everDifferentNeighbours & everMoreThanOne;
 
   NeighbourCount count(state);
   count.bit0 &= relevant;
