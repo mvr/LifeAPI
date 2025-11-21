@@ -820,7 +820,7 @@ public:
     }
   }
 
-  void FlipY() { // even reflection across y-axis, ie (0,0) maps to (0, -1)
+  void FlipY() { // even reflection across y-axis, ie (0,0) maps to (-1, 0)
     Reverse(0, N - 1);
   }
 
@@ -1424,6 +1424,10 @@ LifeState LifeState::Convolve(const LifeState &other) const {
       case (1ULL << 32) - 1: ConvolveInner(result, doubledother, run, k, postshift); break;
       default:               ConvolveInner(result, doubledother, run, k, postshift); break;
       }
+
+      // Already full
+      if ((~result).IsEmpty())
+        return result;
 
       x &= ~std::rotl(run, postshift);
     }

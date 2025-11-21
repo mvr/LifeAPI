@@ -774,6 +774,7 @@ inline LifeState IntersectingOffsets(const LifeState &active, StaticSymmetry sym
 uint64_t LifeState::GetOctoHash() const {
     uint64_t result = 0;
 
+    // TODO this is broken
     for (auto t : allTransforms) {
       LifeState transformed = Transformed(t);
       auto [x, y,_x2, y2] = transformed.XYBounds();

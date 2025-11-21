@@ -666,8 +666,8 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx) {
         }
       }
 
-      if (depth <= 1)
-        AddDatabasePrecursors(currentApgcode, ctx, depth);
+      // if (depth <= 1)
+      //   AddDatabasePrecursors(currentApgcode, ctx, depth);
 
     } catch (const std::exception&) {
       continue;
@@ -720,7 +720,7 @@ void TransferSynthesis::ProcessSynthesis(
       synthesis.component.Realise().RLE()
     );
   }
-  
+
   // If we're at max depth, do database lookup immediately
   if (depth + 1 >= ctx.maxDepth) {
     if (ctx.outputVisitedApgcodes) {

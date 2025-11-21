@@ -11,7 +11,7 @@ TOOLS = Stomp
 
 tools: $(TOOLS)
 
-$(TOOLS): %: tools/%.cpp *.hpp
+$(TOOLS): %: tools/%.cpp *.hpp tools/*.hpp
 	$(CXX) $(CXXFLAGS) $(CXXINCLUDE) -o $@ $< $(LDFLAGS)
 
 GTEST_CFLAGS = `pkg-config --cflags gtest_main`
