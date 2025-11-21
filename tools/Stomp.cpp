@@ -392,13 +392,13 @@ bool TransferSynthesis::IsPromising(const SynthesisResult& synthesis) {
   }
 
   // Steps that just shove a small still life around are not promising
-  if((base_largest & ~synthesis.component.out).IsEmpty()) {
-    LifeState diff = (synthesis.component.base ^ synthesis.component.out).ZOI();
-    LifeState before = synthesis.component.base.ComponentContaining(diff & synthesis.component.base);
-    LifeState after = synthesis.component.out.ComponentContaining(diff & synthesis.component.out);
+  LifeState nearbyDiff = (synthesis.component.base ^ synthesis.component.out) & base_largest.ZOI();
+  if(nearbyDiff.IsEmpty()) {
+    LifeState before = synthesis.component.base & ~base_largest.ZOI();
+    LifeState after = synthesis.component.out & ~base_largest.ZOI();
 
-    // bool beforeSmall = before.GetPop() <= 8 && before.Stepped() == before;
-    // bool afterSmall = after.GetPop() <= 8 && after.Stepped() == after;
+    // bool beforeSmall = !before.IsEmpty() && before.GetPop() <= 8 && before.Stepped() == before;
+    // bool afterSmall = !after.IsEmpty() && after.GetPop() <= 8 && after.Stepped() == after;
 
     bool beforeSmall = before.Stepped() == before;
     bool afterSmall = after.Stepped() == after;
