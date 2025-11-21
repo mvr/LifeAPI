@@ -24,6 +24,7 @@ struct ComponentTemplate {
   // Try to shift glider set to fit in 64x64 torus without wrapping
   void ShiftToFitTorus();
 
+  uint64_t GetHashNonSymmetrised() const;
   uint64_t GetHash() const;
 
   // Debugging only:
@@ -127,13 +128,32 @@ void ComponentTemplate::ShiftToFitTorus() {
   *this = Moved(offset);
 }
 
-uint64_t ComponentTemplate::GetHash() const {
+uint64_t ComponentTemplate::GetHashNonSymmetrised() const {
   uint64_t hash = base.GetHash();
+  // hash = combine_hashes(hash, knownOff.GetHash());
   hash = combine_hashes(hash, out.GetHash());
   hash = combine_hashes(hash, count.bit0.GetHash());
   hash = combine_hashes(hash, count.bit1.GetHash());
   hash = combine_hashes(hash, count.bit2.GetHash());
   return hash;
+}
+
+uint64_t ComponentTemplate::GetHash() const {
+  // Calculate hash for all orientations and use the minimum
+  uint64_t minHash = 0;
+
+  using enum SymmetryTransform;
+  for (auto transform : {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY,
+                         Rotate90, Rotate180OddBoth, Rotate270, ReflectAcrossYeqNegXP1}) {
+    ComponentTemplate transformedTempl = Transformed(transform);
+    transformedTempl.NormalisePosition();
+    uint64_t hash = transformedTempl.GetHashNonSymmetrised();
+
+    if (minHash == 0 || hash < minHash) {
+      minHash = hash;
+    }
+  }
+  return minHash;
 }
 
 std::string ComponentTemplate::RLE() const {

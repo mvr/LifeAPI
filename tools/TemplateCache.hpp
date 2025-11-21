@@ -127,31 +127,15 @@ std::vector<ComponentTemplate> TemplateCache::ExtractTemplatesFromFile(
     for (const Component& comp : components) {
         try {
             if (!IsUsefulComponent(comp)) {
+                if (verbose) {
+                    std::cerr << "Skipping non-useful component: " << comp.Realise() << std::endl;
+                }
                 continue;
             }
             
             ComponentTemplate templ = ComponentTemplate::FromComponent(comp);
-            
-            // Calculate hash for all orientations and use the minimum
-            uint64_t minHash = 0;
-            ComponentTemplate canonicalTempl;
-            
-            using enum SymmetryTransform;
-            for (auto transform : {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY,
-                                  Rotate90, Rotate180OddBoth, Rotate270, ReflectAcrossYeqNegXP1}) {
-                ComponentTemplate transformedTempl = templ.Transformed(transform);
-                transformedTempl.NormalisePosition();
-                uint64_t hash = transformedTempl.GetHash();
-                
-                if (minHash == 0 || hash < minHash) {
-                    minHash = hash;
-                    canonicalTempl = transformedTempl;
-                }
-            }
-            
-            // Store unique template (overwrite if exists, which is fine)
-            uniqueTemplates[minHash] = canonicalTempl;
-            
+            uniqueTemplates[templ.GetHash()] = templ;
+
         } catch (const std::exception& e) {
             if (verbose) {
                 std::cerr << "Error processing component: " << e.what() << std::endl;
@@ -183,11 +167,9 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplatesFromFile(
         return ExtractTemplatesFromFile(filePath, verbose);
     }
     
-    // Generate cache file for this specific file
     std::string cacheKey = GenerateCacheKeyForFile(filePath);
     std::string cacheFile = cacheDir + "/file_" + cacheKey + ".bin";
     
-    // Try to load from cache first
     std::vector<ComponentTemplate> templates;
     if (std::filesystem::exists(cacheFile)) {
         if (verbose) {
@@ -208,10 +190,8 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplatesFromFile(
         std::cerr << "No cache found for " << filePath << ", generating templates" << std::endl;
     }
     
-    // Cache miss or invalid - extract templates
     templates = ExtractTemplatesFromFile(filePath, verbose);
     
-    // Save to cache
     if (verbose) {
         std::cerr << "Caching " << templates.size() << " templates for " << filePath << std::endl;
     }
