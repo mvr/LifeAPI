@@ -103,3 +103,79 @@ LifeHistory LifeHistory::ParseBellman(const std::string &rle) {
     }
   });
 }
+
+inline char LifeHistoryCharAt(const LifeHistory& hist, int x, int y) {
+  unsigned mask = hist.state.GetSafe(x, y)
+                + (hist.history.GetSafe(x, y) << 1)
+                + (hist.marked.GetSafe(x, y) << 2)
+                + (hist.original.GetSafe(x, y) << 3);
+  return LifeHistory::StateToChar(mask);
+}
+
+inline std::string RowRLE(const std::vector<LifeHistory> &row, bool flushtrailing = false, unsigned rowgap = 0) {
+  const unsigned spacing = 84;
+
+  std::stringstream result;
+
+  unsigned eol_count = 0;
+  for (unsigned j = 0; j < spacing; j++) {
+    char last_val = '.';
+    if (j < 64 && !row.empty())
+      last_val = LifeHistoryCharAt(row[0], 0 - N/2, j - 32);
+
+    unsigned run_count = 0;
+
+    for (const auto &pat : row) {
+      for (unsigned i = 0; i < spacing; i++) {
+        char val = '.';
+        if (i < N && j < 64)
+          val = LifeHistoryCharAt(pat, i - N/2, j - 32);
+
+        // Flush linefeeds if we find a non-empty cell
+        if (val != '.' && eol_count > 0) {
+          if (eol_count > 1)
+            result << eol_count;
+
+          result << "$";
+
+          eol_count = 0;
+        }
+
+        // Flush current run if val changes
+        if (val != last_val) {
+          if (run_count > 1)
+            result << run_count;
+
+          result << last_val;
+
+          run_count = 0;
+        }
+
+        run_count++;
+        last_val = val;
+      }
+    }
+
+    // Flush run of non-empty cells at end of line
+    if (last_val != '.') {
+      if (run_count > 1)
+        result << run_count;
+
+      result << last_val;
+    }
+
+    eol_count++;
+  }
+
+  // Flush trailing linefeeds
+  if (flushtrailing && eol_count > 0) {
+    if (eol_count > 1)
+      result << eol_count + rowgap;
+
+    result << "$";
+  } else {
+    result << "!";
+  }
+
+  return result.str();
+}
