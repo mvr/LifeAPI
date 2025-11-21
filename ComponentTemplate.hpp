@@ -58,7 +58,9 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
       throw std::runtime_error("Component took too long");
   }
 
-  LifeState relevant = everActive.ZOI() & everDifferentNeighbours & everMoreThanOne;
+  LifeState glancing = ~everActive & everActive.ZOI() & (startCount.bit0 & ~startCount.bit1 & ~startCount.bit1);
+
+  LifeState relevant = everActive.ZOI() & everDifferentNeighbours & everMoreThanOne & ~glancing;
 
   NeighbourCount count(state);
   count.bit0 &= relevant;
@@ -66,8 +68,10 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
   count.bit2 &= relevant;
   count.bit3 &= relevant;
 
+  LifeState knownOff = ~component.base & ~component.out & everActive.ZOI();
+
   return {component.base & relevant,
-          ~component.base & ~component.out & everActive.ZOI(),
+          knownOff,
           count,
           component.gliderSet,
           component.out & relevant};
