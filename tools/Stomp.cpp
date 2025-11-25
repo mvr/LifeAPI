@@ -18,6 +18,7 @@
 #include "../ComponentTemplate.hpp"
 #include "ComponentDatabase.hpp"
 #include "TemplateCache.hpp"
+#include "TemplateTree.hpp"
 #include "CLI11/include/CLI/CLI.hpp"
 
 template<typename T>
@@ -142,7 +143,9 @@ public:
   static std::vector<SynthesisResult> FindSynthesisSteps(
       const LifeState &targetPattern,
       const std::vector<ComponentTemplate> &templates,
-      const std::unordered_map<std::string, SearchResult> &minPaths);
+      const TemplateTree& templateTree,
+      const std::unordered_map<std::string, SearchResult> &minPaths,
+      bool verbose = false);
 
   static void RunSynthesis(
       const std::vector<std::string> &transferComponentFiles,
@@ -157,7 +160,8 @@ public:
       bool outputVisitedApgcodes = false,
       const std::string& cacheDir = "./template_cache",
       bool useCache = true,
-      const std::unordered_map<std::string, std::vector<std::tuple<unsigned, std::string, std::string>>>& reverseLookup = {});
+      const std::unordered_map<std::string, std::vector<std::tuple<unsigned, std::string, std::string>>>& reverseLookup = {},
+      bool verbose = false);
 
 private:
   using QueueEntry = std::tuple<int, int, std::string>; // population, depth, apgcode
@@ -169,6 +173,7 @@ private:
     std::unordered_set<std::string>& processed;
     std::unordered_set<std::string>& allVisitedApgcodes;
     const std::vector<ComponentTemplate>& templates;
+    const TemplateTree& templateTree;
     const std::unordered_map<std::string, SearchResult>& minPaths;
     const std::unordered_map<std::string, std::vector<std::tuple<unsigned, std::string, std::string>>>& reverseLookup;
     
@@ -177,6 +182,7 @@ private:
     int maxPrecursorPop;
     bool outputVisitedApgcodes;
     bool acceptFirst;
+    bool verbose;
     
     // Shared counters
     std::atomic<int>& processCount;
@@ -208,39 +214,52 @@ private:
 std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesisSteps(
     const LifeState& targetPattern,
     const std::vector<ComponentTemplate>& templates,
-    const std::unordered_map<std::string, SearchResult>& minPaths) {
+    const TemplateTree& templateTree,
+    const std::unordered_map<std::string, SearchResult>& minPaths,
+    bool verbose) {
 
   std::vector<SynthesisResult> results;
   std::string targetApgcode = targetPattern.EncodeApgcode();
 
-  NeighbourCount stateCount(targetPattern);
+  std::vector<TemplateAnchor> anchors;
+  TraversalDebug dbg;
+  TraverseTemplateTree(templateTree,
+                       targetPattern,
+                       templates,
+                       anchors,
+                       verbose ? &dbg : nullptr);
 
-  for (const ComponentTemplate& templ : templates) {
-    LifeState matches = templ.MatchReverse(targetPattern, stateCount);
-    
-    for (auto [x, y] : matches.OnCells()) {
-      try {
-        LifeState transformedBase = templ.base.Moved(x, y);
-        LifeState transformedOut = templ.out.Moved(x, y);
-        
-        Component resultComp;
-        resultComp.base = (targetPattern & ~transformedOut) | transformedBase;
-        resultComp.gliderSet = templ.gliderSet.Moved({x, y});
-        resultComp.out = targetPattern;
+  for (const auto& anchor : anchors) {
+    const ComponentTemplate& templ = templates[anchor.templateIndex];
+    try {
+      LifeState transformedBase = templ.base.Moved(anchor.x, anchor.y);
+      LifeState transformedOut = templ.out.Moved(anchor.x, anchor.y);
 
-        resultComp.ShiftToFitTorus();
+      Component resultComp;
+      resultComp.base = (targetPattern & ~transformedOut) | transformedBase;
+      resultComp.gliderSet = templ.gliderSet.Moved({anchor.x, anchor.y});
+      resultComp.out = targetPattern;
 
-        if (!resultComp.SanityCheck()) continue;
+      resultComp.ShiftToFitTorus();
 
-        std::string precursorApgcode = resultComp.base.EncodeApgcode();
+      if (!resultComp.SanityCheck()) continue;
 
-        results.emplace_back(resultComp, precursorApgcode, targetApgcode);
-      } catch (const std::exception&) {
-        continue;
-      }
+      std::string precursorApgcode = resultComp.base.EncodeApgcode();
+
+      results.emplace_back(resultComp, precursorApgcode, targetApgcode);
+    } catch (const std::exception&) {
+      continue;
     }
   }
-  
+  if (verbose) {
+    std::cerr << "Tree traversal: nodes=" << dbg.nodesVisited
+              << " leaves=" << dbg.leavesVisited
+              << " pruned=" << dbg.pruned
+              << " templates=" << dbg.templatesVisited
+              << " anchors=" << dbg.anchorsFound
+              << " components=" << results.size() << std::endl;
+  }
+
   return results;
 }
 
@@ -424,12 +443,21 @@ void TransferSynthesis::RunSynthesis(
     bool outputVisitedApgcodes,
     const std::string& cacheDir,
     bool useCache,
-    const std::unordered_map<std::string, std::vector<std::tuple<unsigned, std::string, std::string>>>& reverseLookup) {
+    const std::unordered_map<std::string, std::vector<std::tuple<unsigned, std::string, std::string>>>& reverseLookup,
+    bool verbose) {
 
   // Load component templates using cache
   TemplateCache templateCache;
   std::vector<ComponentTemplate> templates = templateCache.LoadTemplates(
     transferComponentFiles, true, minTemplateOccurrences, cacheDir, useCache);
+  TemplateTree templateTree = BuildTemplateTree(templates, 32, 16, verbose, std::cerr, 0.4);
+  if (verbose) {
+    auto stats = ComputeStats(templateTree);
+    std::cerr << "Template tree built: nodes=" << stats.nodes
+              << " leaves=" << stats.leaves
+              << " maxDepth=" << stats.maxDepth
+              << " templates=" << templates.size() << std::endl;
+  }
 
   // Build mini synthesis database using ComponentDatabase
   ComponentDatabase miniDb;
@@ -500,12 +528,14 @@ void TransferSynthesis::RunSynthesis(
       .processed = processed,
       .allVisitedApgcodes = allVisitedApgcodes,
       .templates = templates,
+      .templateTree = templateTree,
       .minPaths = minPaths,
       .reverseLookup = reverseLookup,
       .maxDepth = maxDepth,
       .maxPrecursorPop = maxPrecursorPop,
       .outputVisitedApgcodes = outputVisitedApgcodes,
       .acceptFirst = acceptFirst,
+      .verbose = verbose,
       .processCount = processCount,
       .processedMutex = processedMutex,
       .miniDbMutex = miniDbMutex,
@@ -655,7 +685,7 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx) {
       auto orientations = targetPattern.SymmetryOrbit();
       
       for (const LifeState& pattern : orientations) {
-        auto syntheses = FindSynthesisSteps(pattern, ctx.templates, ctx.minPaths);
+        auto syntheses = FindSynthesisSteps(pattern, ctx.templates, ctx.templateTree, ctx.minPaths, ctx.verbose);
         
         for (auto& synthesis : syntheses) {
           ProcessSynthesis(synthesis, ctx, depth);
@@ -1165,7 +1195,8 @@ int main(int argc, char* argv[]) {
             outputVisitedApgcodes,
             cacheDir,
             !noCache,
-            reverseLookup
+            reverseLookup,
+            verbose
         );
 
     } catch (const std::exception& e) {

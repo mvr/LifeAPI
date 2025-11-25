@@ -16,6 +16,7 @@ struct ComponentTemplate {
   static ComponentTemplate FromComponent(const Component &component);
   LifeState MatchReverse(const LifeState &state, const NeighbourCount &count) const;
   LifeState MatchReverse(const LifeState &state) const;
+  LifeState MatchReverseMirrored(const LifeState &stateMirrored, const NeighbourCount &countMirrored) const;
 
   ComponentTemplate Transformed(SymmetryTransform t) const;
   ComponentTemplate Moved(std::pair<int, int> p) const;
@@ -96,6 +97,29 @@ LifeState ComponentTemplate::MatchReverse(const LifeState &state, const Neighbou
 LifeState ComponentTemplate::MatchReverse(const LifeState &state) const {
   NeighbourCount stateCount(state);
   return MatchReverse(state, stateCount);
+}
+
+// This avoids the repeated use of Mirrored() inside the Match calls
+LifeState ComponentTemplate::MatchReverseMirrored(const LifeState &stateMirrored, const NeighbourCount &stateCountMirrored) const {
+  LifeState candidates = ~out.Convolve(~stateMirrored);
+  if (candidates.IsEmpty())
+    return LifeState();
+
+  candidates &= ~count.bit0.Convolve(~stateCountMirrored.bit0);
+  if(candidates.IsEmpty())
+    return LifeState();
+
+  candidates &= ~count.bit1.Convolve(~stateCountMirrored.bit1);
+  if(candidates.IsEmpty())
+    return LifeState();
+
+  candidates &= ~count.bit2.Convolve(~stateCountMirrored.bit2);
+  if(candidates.IsEmpty())
+    return LifeState();
+
+  candidates &= ~knownOff.Convolve(stateMirrored);
+
+  return candidates;
 }
 
 ComponentTemplate ComponentTemplate::Transformed(SymmetryTransform t) const {
