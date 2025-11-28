@@ -83,11 +83,11 @@ inline std::vector<TemplateFeature> CollectFeatures(const ComponentTemplate& tem
   };
 
   addLive(templ.out, SplitField::StateLive);
-  addDead(templ.knownOff);
+  // addDead(templ.knownOff & templ.out.ZOI());
   addLive(templ.count.bit0, SplitField::Count0Live);
   addLive(templ.count.bit1, SplitField::Count1Live);
   addLive(templ.count.bit2, SplitField::Count2Live);
-  addLive(templ.count.bit3, SplitField::Count3Live);
+  // addLive(templ.count.bit3, SplitField::Count3Live);
 
   return result;
 }
@@ -146,6 +146,7 @@ inline double ScoreSplit(const SplitCandidateStats& stats) {
 
 struct TemplateEntry {
   int index;
+  LifeState mask; // allowed translations consistent with splits on the path
 };
 
 inline int BuildNode(const std::vector<TemplateEntry>& entries,
@@ -158,6 +159,10 @@ inline int BuildNode(const std::vector<TemplateEntry>& entries,
               std::ostream& log,
               size_t& nodesBuilt,
               double minDefiniteFraction) {
+  if (entries.size() == 0) {
+    return -1;
+  }
+
   TemplateTreeNode node;
 
   if (verbose) {
@@ -187,18 +192,23 @@ inline int BuildNode(const std::vector<TemplateEntry>& entries,
     }
   }
 
-  if (freq.empty()) {
-    node.leaf = true;
-    node.templateIndices.reserve(entries.size());
-    for (const auto& e : entries) node.templateIndices.push_back(e.index);
-    tree.nodes.push_back(std::move(node));
-    return static_cast<int>(tree.nodes.size() - 1);
+  bool forceRootSplit = (depth == 0);
+  std::vector<std::pair<SplitKey, int>> candidates;
+  if (forceRootSplit) {
+    candidates.push_back({{0, 0, SplitField::StateLive}, static_cast<int>(entries.size())});
+  } else {
+    if (freq.empty()) {
+      node.leaf = true;
+      node.templateIndices.reserve(entries.size());
+      for (const auto& e : entries) node.templateIndices.push_back(e.index);
+      tree.nodes.push_back(std::move(node));
+      return static_cast<int>(tree.nodes.size() - 1);
+    }
+    candidates.assign(freq.begin(), freq.end());
+    std::sort(candidates.begin(), candidates.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+    if (candidates.size() > 32) candidates.resize(32);
   }
-
-  std::vector<std::pair<SplitKey, int>> candidates(freq.begin(), freq.end());
-  std::sort(candidates.begin(), candidates.end(),
-            [](const auto& a, const auto& b) { return a.second > b.second; });
-  if (candidates.size() > 4) candidates.resize(4);
 
   double bestScore = -1.0;
   SplitKey bestKey = candidates.front().first;
@@ -207,21 +217,27 @@ inline int BuildNode(const std::vector<TemplateEntry>& entries,
   for (const auto& [key, _] : candidates) {
     SplitCandidateStats stats{};
     for (const auto& e : entries) {
-      bool constrained = false;
-      bool live = false;
-      for (const auto& f : tree.features[e.index]) {
-        if (f.x == key.dx && f.y == key.dy && f.field == key.field) {
-          constrained = true;
-          live = f.expectsLive;
-          break;
+      const auto& feats = tree.features[e.index];
+      LifeState yesMask;
+      LifeState noMask;
+      for (const auto& f : feats) {
+        if (f.field != key.field) continue;
+        if (f.expectsLive) {
+          yesMask.SetSafe({key.dx - f.x, key.dy - f.y});
+        } else {
+          noMask.SetSafe({key.dx - f.x, key.dy - f.y});
         }
       }
-      if (!constrained) {
-        stats.both++;
-      } else if (live) {
+      yesMask &= e.mask;
+      noMask &= e.mask;
+      bool hasYes = !yesMask.IsEmpty();
+      bool hasNo = !noMask.IsEmpty();
+      if (hasYes) {
         stats.yes++;
-      } else {
+      } else if (hasNo) {
         stats.no++;
+      } else {
+        stats.both++;
       }
     }
     double score = ScoreSplit(stats);
@@ -258,21 +274,28 @@ inline int BuildNode(const std::vector<TemplateEntry>& entries,
   maybeEntries.reserve(entries.size());
 
   for (const auto& e : entries) {
-    bool constrained = false;
-    bool live = false;
-    for (const auto& f : tree.features[e.index]) {
-      if (f.x == bestKey.dx && f.y == bestKey.dy && f.field == bestKey.field) {
-        constrained = true;
-        live = f.expectsLive;
-        break;
+    const auto& feats = tree.features[e.index];
+    LifeState yesMask;
+    LifeState noMask;
+    for (const auto& f : feats) {
+      if (f.field != bestKey.field) continue;
+      if (f.expectsLive) {
+        yesMask.SetSafe({bestKey.dx - f.x, bestKey.dy - f.y});
+      } else {
+        noMask.SetSafe({bestKey.dx - f.x, bestKey.dy - f.y});
       }
     }
-    if (!constrained) {
-      maybeEntries.push_back(e);
-    } else if (live) {
-      yesEntries.push_back(e);
+    yesMask &= e.mask;
+    noMask &= e.mask;
+
+    bool hasYes = !yesMask.IsEmpty();
+    bool hasNo = !noMask.IsEmpty();
+    if (hasYes) {
+      yesEntries.push_back({e.index, yesMask});
+    } else if (hasNo) {
+      noEntries.push_back({e.index, noMask});
     } else {
-      noEntries.push_back(e);
+      maybeEntries.push_back(e);
     }
   }
 
@@ -281,7 +304,6 @@ inline int BuildNode(const std::vector<TemplateEntry>& entries,
   node.dy = bestKey.dy;
   node.field = bestKey.field;
 
-  usedSplits.insert(bestKey);
   usedSplits.insert(bestKey);
   node.yesChild = BuildNode(yesEntries, tree, leafSize, depthLimit, depth + 1, usedSplits, verbose, log, nodesBuilt, minDefiniteFraction);
   node.noChild = BuildNode(noEntries, tree, leafSize, depthLimit, depth + 1, usedSplits, verbose, log, nodesBuilt, minDefiniteFraction);
@@ -293,7 +315,6 @@ inline int BuildNode(const std::vector<TemplateEntry>& entries,
     log << indent << "Split depth " << depth
         << " at (" << bestKey.dx << "," << bestKey.dy << ") field " << static_cast<int>(bestKey.field)
         << " yes=" << bestStats.yes << " no=" << bestStats.no << " both=" << bestStats.both << "\n";
-    log << "  built " << nodesBuilt << " nodes so far (depth " << depth << ", entries " << entries.size() << ")\n";
   }
 
   tree.nodes.push_back(std::move(node));
@@ -311,13 +332,18 @@ inline TemplateTree BuildTemplateTree(std::vector<ComponentTemplate>& templates,
   tree.features.reserve(templates.size());
   for (auto& templ : templates) {
     templ.NormalisePosition();
+    if (!templ.out.IsEmpty()) {
+      auto anchor = templ.out.FirstOn();
+      templ = templ.Moved({-anchor.first, -anchor.second});
+    }
     tree.features.push_back(CollectFeatures(templ));
   }
 
   std::vector<TemplateEntry> rootEntries;
   rootEntries.reserve(templates.size());
+  LifeState fullMask = ~LifeState();
   for (int i = 0; i < static_cast<int>(templates.size()); ++i) {
-    rootEntries.push_back({i});
+    rootEntries.push_back({i, fullMask});
   }
   std::unordered_set<SplitKey, SplitKeyHash> usedSplits;
   size_t nodesBuilt = 0;
@@ -342,7 +368,8 @@ inline void TraverseTemplateTree(
     const std::vector<ComponentTemplate>& templates,
     const LifeState& candidateMask,
     std::vector<TemplateAnchor>& results,
-    TraversalDebug* dbg = nullptr) {
+    TraversalDebug* dbg = nullptr,
+    unsigned depth = 0) {
   if (nodeIdx < 0)
     return;
 
@@ -356,24 +383,25 @@ inline void TraverseTemplateTree(
   const TemplateTreeNode& node = tree.nodes[nodeIdx];
   if (node.leaf) {
     if (dbg) dbg->leavesVisited++;
+
     for (int templIdx : node.templateIndices) {
       if (dbg) dbg->templatesVisited++;
       const ComponentTemplate& templ = templates[templIdx];
-      LifeState matches = templ.MatchReverseMirrored(targetStateMirrored, targetCountMirrored);
-      for (auto [x, y] : matches.OnCells()) {
+      LifeState matches = templ.MatchReverseMirrored(targetStateMirrored,
+      targetCountMirrored); for (auto [x, y] : matches.OnCells()) {
         results.push_back({templIdx, -x, -y}); // Record mirrored
         if (dbg) dbg->anchorsFound++;
       }
     }
+
     return;
   }
 
   LifeState fieldMask = FieldMask(targetState, targetCount, node.field, node.dx, node.dy);
 
-  TraverseTemplateTree(node.yesChild, tree, targetState, targetCount, targetStateMirrored, targetCountMirrored,  templates, candidateMask & fieldMask, results, dbg);
-  TraverseTemplateTree(node.noChild, tree, targetState, targetCount, targetStateMirrored, targetCountMirrored,  templates, candidateMask & ~fieldMask, results, dbg);
-  TraverseTemplateTree(node.maybeChild, tree, targetState, targetCount, targetStateMirrored, targetCountMirrored,  templates, candidateMask, results, dbg);
-
+  TraverseTemplateTree(node.yesChild, tree, targetState, targetCount, targetStateMirrored, targetCountMirrored, templates, candidateMask & fieldMask, results, dbg, depth + 1);
+  TraverseTemplateTree(node.noChild, tree, targetState, targetCount, targetStateMirrored, targetCountMirrored, templates, candidateMask & ~fieldMask, results, dbg, depth + 1);
+  TraverseTemplateTree(node.maybeChild, tree, targetState, targetCount, targetStateMirrored, targetCountMirrored, templates, candidateMask, results, dbg, depth + 1);
 }
 
 inline void TraverseTemplateTree(
@@ -384,7 +412,7 @@ inline void TraverseTemplateTree(
   NeighbourCount targetCount(targetState);
   LifeState targetStateMirrored = targetState.Mirrored();
   NeighbourCount targetCountMirrored(targetStateMirrored);
-  TraverseTemplateTree(tree.root, tree, targetState, targetCount, targetStateMirrored, targetCountMirrored, templates, ~LifeState(), results, dbg);
+  TraverseTemplateTree(tree.root, tree, targetState, targetCount, targetStateMirrored, targetCountMirrored, templates, ~LifeState(), results, dbg, 0);
 }
 
 struct TemplateTreeStats {

@@ -450,7 +450,7 @@ void TransferSynthesis::RunSynthesis(
   TemplateCache templateCache;
   std::vector<ComponentTemplate> templates = templateCache.LoadTemplates(
     transferComponentFiles, true, minTemplateOccurrences, cacheDir, useCache);
-  TemplateTree templateTree = BuildTemplateTree(templates, 32, 16, verbose, std::cerr, 0.4);
+  TemplateTree templateTree = BuildTemplateTree(templates, 8, 128, verbose, std::cerr, 0.0);
   if (verbose) {
     auto stats = ComputeStats(templateTree);
     std::cerr << "Template tree built: nodes=" << stats.nodes

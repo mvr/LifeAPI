@@ -133,6 +133,7 @@ struct __attribute__((aligned(64))) LifeState {
   void Erase(unsigned x, unsigned y) { state[x] &= ~(1ULL << y); }
   void Set(unsigned x, unsigned y, bool val) { if(val) Set(x, y); else Erase(x, y); }
   bool Get(unsigned x, unsigned y) const { return (state[x] & (1ULL << y)) != 0; }
+  void SetSafe(int x, int y) { Set(torus_wrap(x), torus_wrap(y)); }
   void SetSafe(int x, int y, bool val) { Set(torus_wrap(x), torus_wrap(y), val); }
   bool GetSafe(int x, int y) const { return Get(torus_wrap(x), torus_wrap(y)); }
 
@@ -140,6 +141,7 @@ struct __attribute__((aligned(64))) LifeState {
   void Erase(std::pair<int, int> cell) { Erase(cell.first, cell.second); };
   void Set(std::pair<int, int> cell, bool val) { Set(cell.first, cell.second, val); };
   bool Get(std::pair<int, int> cell) const { return Get(cell.first, cell.second); };
+  void SetSafe(std::pair<int, int> cell) { SetSafe(cell.first, cell.second); };
   void SetSafe(std::pair<int, int> cell, bool val) { SetSafe(cell.first, cell.second, val); };
   bool GetSafe(std::pair<int, int> cell) const { return GetSafe(cell.first, cell.second); };
 
