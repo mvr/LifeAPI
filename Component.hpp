@@ -39,6 +39,8 @@ public:
   inline GliderSet Moved(std::pair<int, int> p) const;
   // Try to shift glider set to fit in 64x64 torus without wrapping
   inline std::pair<int, int> OffsetToFitTorus() const;
+  inline std::vector<LifeState> ExtractGliders() const;
+  inline GliderSet RemoveGlider(const LifeState& glider) const;
 
   static inline GliderSet FromSJK(const std::string& gliderData, unsigned rewind = 4);
   inline std::string ToSJK() const;
@@ -66,6 +68,7 @@ struct Component {
   inline static std::pair<std::string, int> ParseApgcodeWithPhase(const std::string& inData);
 
   inline static LifeState BaseGlider(int steps);
+  inline static LifeState RunComponentOutcome(const LifeState& base, const GliderSet& gliders);
 };
 
 
@@ -160,6 +163,39 @@ GliderSet GliderSet::Moved(std::pair<int, int> p) const {
   };
 }
 
+std::vector<LifeState> GliderSet::ExtractGliders() const {
+  std::vector<LifeState> result;
+  const LifeState salvos[4] = {se, sw, nw, ne};
+
+  static const SymmetryTransform dirTransform[4] = {
+    SymmetryTransform::Identity,
+    SymmetryTransform::Rotate90,
+    SymmetryTransform::Rotate180OddBoth,
+    SymmetryTransform::Rotate270,
+  };
+
+  for (int dir = 0; dir < 4; ++dir) {
+    const LifeState& salvo = salvos[dir];
+    for (int phase = 0; phase < 4; ++phase) {
+      LifeState glider = Component::BaseGlider(phase).Transformed(dirTransform[dir]);
+      LifeState matches = salvo.MatchLive(glider);
+      for (auto [x, y] : matches.OnCells()) {
+        result.push_back(glider.Moved(x, y));
+      }
+    }
+  }
+
+  return result;
+}
+
+GliderSet GliderSet::RemoveGlider(const LifeState& glider) const {
+  GliderSet copy = *this;
+  copy.se &= ~glider;
+  copy.sw &= ~glider;
+  copy.nw &= ~glider;
+  copy.ne &= ~glider;
+  return copy;
+}
 
 std::pair<int, int> GliderSet::OffsetToFitTorus() const {
   const int DANGER_ZONE = 16;
@@ -496,6 +532,18 @@ LifeState Component::BaseGlider(int steps) {
   };
 
   return gliderPhases[steps & 0b11].Moved(steps >> 2, steps >> 2);
+}
+
+LifeState Component::RunComponentOutcome(const LifeState& base, const GliderSet& gliders) {
+  LifeState out = base | gliders.Realise();
+  unsigned gen = 0;
+  while (gen < 300) {
+    LifeState prev = out;
+    out.Step();
+    gen++;
+    if (out == prev) break;
+  }
+  return out;
 }
 
 Component Component::FromSJK(const std::string& compStr) {
