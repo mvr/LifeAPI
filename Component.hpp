@@ -314,6 +314,9 @@ LifeState Component::Realise() const {
 
 // TODO: This could be better
 bool Component::SanityCheck() const {
+  if (base.Stepped() != base)
+    return false;
+
   if (Realise().Stepped(200) != out)
     return false;
 
