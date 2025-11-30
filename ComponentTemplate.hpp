@@ -31,7 +31,8 @@ struct ComponentTemplate {
   uint64_t GetHash() const;
 
   // Debugging only:
-  std::string RLE() const;
+  LifeHistory ToHistory() const;
+  std::string RLE() const { return ToHistory().RLEWHeader(); };
 };
 
 ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
@@ -186,16 +187,20 @@ uint64_t ComponentTemplate::GetHash() const {
   return minHash;
 }
 
-std::string ComponentTemplate::RLE() const {
+LifeHistory ComponentTemplate::ToHistory() const {
   // LifeState marked = count.bit3 | count.bit2 | count.bit1 | count.bit0;
   // LifeState original = base & out;
   // marked &= ~original;
-  // LifeHistory history(base | gliderSet.Realise(), LifeState(), marked, original);
-  // return history.RLEWHeader();
+  // LifeHistory history(base | gliderSet.Realise(), LifeState(), marked,
+  // original); return history;
+
+  LifeState marked = count.bit3 | count.bit2 | count.bit1 | count.bit0;
+  LifeHistory history(out, LifeState(), marked, LifeState());
+  return history;
 
   // LifeState marked = out;
   // LifeState original = base & out;
   // marked &= ~original;
-  LifeHistory history(base | gliderSet.Realise(), LifeState(), out);
-  return history.RLEWHeader();
+  // LifeHistory history(base | gliderSet.Realise(), LifeState(), out);
+  // return history;
 }
