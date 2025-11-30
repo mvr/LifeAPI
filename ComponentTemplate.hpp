@@ -13,6 +13,8 @@ struct ComponentTemplate {
   GliderSet gliderSet;
   LifeState out;
 
+  bool operator==(const ComponentTemplate&) const = default;
+
   static ComponentTemplate FromComponent(const Component &component);
   LifeState MatchReverse(const LifeState &state, const NeighbourCount &count) const;
   LifeState MatchReverse(const LifeState &state) const;

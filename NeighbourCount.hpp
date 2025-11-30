@@ -15,6 +15,8 @@ struct NeighbourCount {
   : bit3{InitializedTag::UNINITIALIZED}, bit2{InitializedTag::UNINITIALIZED}, bit1{InitializedTag::UNINITIALIZED}, bit0{InitializedTag::UNINITIALIZED} {}
   NeighbourCount(const LifeState &bit3, const LifeState &bit2, const LifeState &bit1, const LifeState &bit0) : bit3{bit3}, bit2{bit2}, bit1{bit1}, bit0{bit0} {};
 
+  bool operator==(const NeighbourCount&) const = default;
+
   NeighbourCount operator~() const {
     NeighbourCount result;
     result.bit3 = ~bit3;
