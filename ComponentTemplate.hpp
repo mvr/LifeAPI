@@ -39,7 +39,7 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
   LifeState state = component.Realise();
   LifeState everActive;
 
-  NeighbourCount startCount(state);
+  NeighbourCount startCount(component.base);
   LifeState everDifferentNeighbours;
   LifeState everMoreThanOne;
 
