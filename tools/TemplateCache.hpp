@@ -515,18 +515,27 @@ bool TemplateCache::IsUsefulComponent(const Component &comp) {
 
   // Filter out components where all input still lifes are small
   // (these are likely syntheses replicating soups)
-  auto components = comp.base.StillComponents();
-  if (components.size() > 0) {
+  auto baseComponents = comp.base.StillComponents();
+  if (baseComponents.size() > 0) {
     bool hasLargeComponent = false;
-    for (const auto& component : components) {
+    for (const auto& component : baseComponents) {
       if (component.GetPop() > 6) {
         hasLargeComponent = true;
         break;
       }
     }
     if (!hasLargeComponent) {
-      std::cerr << "Skipping all small component " << comp.Realise() << std::endl;
       return false;
+    }
+  }
+
+  // Filter out components which create a new small still life
+  auto outComponents = comp.out.StillComponents();
+  if (outComponents.size() > 1) {
+    for (const auto& component : outComponents) {
+      if (!(component & ~comp.base).IsEmpty() && component.GetPop() <= 8) {
+        return false;
+      }
     }
   }
 
