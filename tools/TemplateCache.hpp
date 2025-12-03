@@ -13,6 +13,7 @@
 
 #include "../Component.hpp"
 #include "../ComponentTemplate.hpp"
+#include "ComponentDatabase.hpp"
 
 class TemplateCache {
 public:
@@ -20,9 +21,9 @@ public:
     std::vector<ComponentTemplate> LoadTemplates(
         const std::vector<std::string>& filePaths,
         bool verbose = false,
-        unsigned minOccurrences = 1,
         const std::string& cacheDir = "./template_cache",
-        bool useCache = true);
+        bool useCache = true,
+        const std::unordered_map<std::string, SearchResult>* costDb = nullptr);
     
     // Cache management
     bool ClearCache(const std::string& cacheDir = "./template_cache");
@@ -30,24 +31,29 @@ public:
     // Filter function to determine if a component is useful for synthesis
     static bool IsUsefulComponent(const Component& comp);
 
-private:
-    // Per-file template extraction 
+    // Per-file template extraction
     std::vector<ComponentTemplate> ExtractTemplatesFromFile(
         const std::string& filePath,
-        bool verbose = false);
+        bool verbose = false,
+        const std::unordered_map<std::string, SearchResult>* costDb = nullptr);
     
     // Load templates from a single file with caching
     std::vector<ComponentTemplate> LoadTemplatesFromFile(
         const std::string& filePath,
         const std::string& cacheDir,
         bool useCache,
-        bool verbose = false);
+        bool verbose = false,
+        const std::unordered_map<std::string, SearchResult>* costDb = nullptr);
     
     // Combine and deduplicate templates from multiple files
-    std::vector<ComponentTemplate> CombineAndDeduplicateTemplates(
-        const std::vector<std::vector<ComponentTemplate>>& allTemplates,
+    static std::vector<ComponentTemplate> CombineAndDeduplicateTemplates(
+        std::vector<ComponentTemplate> templates,
         unsigned minOccurrences = 1,
-        bool verbose = false);
+        bool verbose = false,
+        bool pruneGenerality = false);
+
+    // Canonicalise a template by trying all symmetries, returning the minimising transform and offset
+    static std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int> CanonicaliseTemplate(const ComponentTemplate& templ);
     
     // Cache helper methods
     std::string GenerateCacheKeyForFile(const std::string& filePath);
@@ -55,7 +61,9 @@ private:
     void SaveTemplatesToCache(const std::string& cacheFile, const std::vector<ComponentTemplate>& templates);
     
     // Component loading from single file
-    std::vector<Component> LoadComponentsFromFile(const std::string& filePath, bool verbose = false);
+    std::vector<Component> LoadComponentsFromFile(const std::string& filePath,
+                                                  bool verbose = false,
+                                                  const std::unordered_map<std::string, SearchResult>* costDb = nullptr);
 };
 
 // Implementation
@@ -63,21 +71,23 @@ private:
 std::vector<ComponentTemplate> TemplateCache::LoadTemplates(
     const std::vector<std::string>& filePaths,
     bool verbose,
-    unsigned minOccurrences,
     const std::string& cacheDir,
-    bool useCache) {
-    
+    bool useCache,
+    const std::unordered_map<std::string, SearchResult>* costDb) {
+
     if (!useCache) {
         if (verbose) {
             std::cerr << "Cache disabled, loading templates directly from all files" << std::endl;
         }
         // Load templates from each file without caching
-        std::vector<std::vector<ComponentTemplate>> allFileTemplates;
+        std::vector<ComponentTemplate> combined;
         for (const auto& filePath : filePaths) {
-            std::vector<ComponentTemplate> fileTemplates = ExtractTemplatesFromFile(filePath, verbose);
-            allFileTemplates.push_back(fileTemplates);
+            std::vector<ComponentTemplate> fileTemplates = ExtractTemplatesFromFile(filePath, verbose, costDb);
+            combined.insert(combined.end(),
+                            std::make_move_iterator(fileTemplates.begin()),
+                            std::make_move_iterator(fileTemplates.end()));
         }
-        return CombineAndDeduplicateTemplates(allFileTemplates, minOccurrences, verbose);
+        return combined;
     }
     
     // Create cache directory if it doesn't exist
@@ -90,12 +100,18 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplates(
     // Load templates from each file individually (with per-file caching)
     std::vector<std::vector<ComponentTemplate>> allFileTemplates;
     for (const auto& filePath : filePaths) {
-        std::vector<ComponentTemplate> fileTemplates = LoadTemplatesFromFile(filePath, cacheDir, useCache, verbose);
+        std::vector<ComponentTemplate> fileTemplates = LoadTemplatesFromFile(filePath, cacheDir, useCache, verbose, costDb);
         allFileTemplates.push_back(fileTemplates);
     }
     
-    // Combine and deduplicate across all files
-    return CombineAndDeduplicateTemplates(allFileTemplates, minOccurrences, verbose);
+    // Combine across all files (dedup later)
+    std::vector<ComponentTemplate> combined;
+    for (auto& vec : allFileTemplates) {
+        combined.insert(combined.end(),
+                        std::make_move_iterator(vec.begin()),
+                        std::make_move_iterator(vec.end()));
+    }
+    return combined;
 }
 
 bool TemplateCache::ClearCache(const std::string& cacheDir) {
@@ -112,14 +128,15 @@ bool TemplateCache::ClearCache(const std::string& cacheDir) {
 
 std::vector<ComponentTemplate> TemplateCache::ExtractTemplatesFromFile(
     const std::string& filePath,
-    bool verbose) {
+    bool verbose,
+    const std::unordered_map<std::string, SearchResult>* costDb) {
     
     if (verbose) {
         std::cerr << "Extracting templates from " << filePath << std::endl;
     }
     
     // Load components from single file
-    std::vector<Component> components = LoadComponentsFromFile(filePath, verbose);
+    std::vector<Component> components = LoadComponentsFromFile(filePath, verbose, costDb);
     
     // Extract unique templates (no occurrence filtering at file level)
     std::unordered_map<uint64_t, ComponentTemplate> uniqueTemplates;
@@ -161,10 +178,11 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplatesFromFile(
     const std::string& filePath,
     const std::string& cacheDir,
     bool useCache,
-    bool verbose) {
+    bool verbose,
+    const std::unordered_map<std::string, SearchResult>* costDb) {
     
     if (!useCache) {
-        return ExtractTemplatesFromFile(filePath, verbose);
+        return ExtractTemplatesFromFile(filePath, verbose, costDb);
     }
     
     std::string cacheKey = GenerateCacheKeyForFile(filePath);
@@ -190,7 +208,7 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplatesFromFile(
         std::cerr << "No cache found for " << filePath << ", generating templates" << std::endl;
     }
     
-    templates = ExtractTemplatesFromFile(filePath, verbose);
+    templates = ExtractTemplatesFromFile(filePath, verbose, costDb);
     
     if (verbose) {
         std::cerr << "Caching " << templates.size() << " templates for " << filePath << std::endl;
@@ -201,57 +219,140 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplatesFromFile(
 }
 
 std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
-    const std::vector<std::vector<ComponentTemplate>>& allFileTemplates,
+    std::vector<ComponentTemplate> templates,
     unsigned minOccurrences,
-    bool verbose) {
-    
-    // Count total templates before deduplication
-    unsigned totalTemplatesBeforeDedup = 0;
-    for (const auto& fileTemplates : allFileTemplates) {
-        totalTemplatesBeforeDedup += fileTemplates.size();
-    }
-    
+    bool verbose,
+    bool pruneGenerality) {
+
+    auto isSubset = [](const LifeState& a, const LifeState& b) {
+        return (a & ~b).IsEmpty();
+    };
+
+    auto isMoreGeneral = [&](const ComponentTemplate& a, const ComponentTemplate& b) {
+        return // isSubset(a.knownOff, b.knownOff) &&
+               isSubset(a.count.bit0, b.count.bit0) &&
+               isSubset(a.count.bit1, b.count.bit1) &&
+               isSubset(a.count.bit2, b.count.bit2) &&
+               isSubset(a.count.bit3, b.count.bit3);
+    };
+
     if (verbose) {
-        std::cerr << "Combining and deduplicating " << totalTemplatesBeforeDedup 
+        std::cerr << "Combining and deduplicating " << templates.size()
                   << " templates across all files" << std::endl;
     }
     
-    // Count occurrences across all files
+    // Count occurrences
     std::unordered_map<uint64_t, std::tuple<ComponentTemplate, unsigned>> templateCounts; // template, count
-    
-    for (const auto& fileTemplates : allFileTemplates) {
-        for (const auto& templ : fileTemplates) {
-            uint64_t hash = templ.GetHash();
-            auto it = templateCounts.find(hash);
-            if (it == templateCounts.end()) {
-                templateCounts[hash] = std::make_tuple(templ, 1);
-            } else {
-                auto& [existingTempl, count] = it->second;
-                count++;
-            }
+    for (const auto& templ : templates) {
+        uint64_t hash = templ.GetHash();
+        auto it = templateCounts.find(hash);
+        if (it == templateCounts.end()) {
+            templateCounts[hash] = std::make_tuple(templ, 1);
+        } else {
+            auto& [existingTempl, count] = it->second;
+            count++;
         }
     }
     
-    // Filter by minimum occurrences
-    std::vector<ComponentTemplate> result;
+    // Filter by minimum occurrences, then group by canonical base/out
+    std::vector<ComponentTemplate> candidates;
+    candidates.reserve(templateCounts.size());
     unsigned totalTemplates = templateCounts.size();
     
     for (const auto& [hash, tuple] : templateCounts) {
         const auto& [templ, count] = tuple;
         if (count >= minOccurrences) {
-            result.push_back(templ);
+            candidates.push_back(templ);
+        }
+    }
+
+    std::unordered_map<uint64_t, std::vector<ComponentTemplate>> groups;
+    for (const auto& templ : candidates) {
+        auto [canon, hash, t, dx, dy] = CanonicaliseTemplate(templ);
+        (void)t; (void)dx; (void)dy;
+        groups[hash].push_back(std::move(canon));
+    }
+
+    std::vector<ComponentTemplate> result;
+    result.reserve(candidates.size());
+
+    for (auto& [key, vec] : groups) {
+        if (!pruneGenerality) {
+            for (auto& t : vec) result.push_back(std::move(t));
+            continue;
+        }
+        std::vector<ComponentTemplate> kept;
+        for (auto& t : vec) {
+            bool dominated = false;
+            for (const auto& k : kept) {
+                if (isMoreGeneral(k, t)) {
+                    dominated = true;
+                    break;
+                }
+            }
+            if (dominated) continue;
+            // Drop any kept templates that t generalises
+            kept.erase(std::remove_if(kept.begin(), kept.end(),
+                                      [&](const ComponentTemplate& other) { return isMoreGeneral(t, other); }),
+                       kept.end());
+            kept.push_back(std::move(t));
+        }
+        for (auto& t : kept) {
+            result.push_back(std::move(t));
         }
     }
     
     if (verbose) {
         std::cerr << "Combined " << totalTemplates << " unique templates, filtered to " 
-                  << result.size() << " (occurring ≥" << minOccurrences << " times)" << std::endl;
+                  << result.size() << " (occurring ≥" << minOccurrences << " times"
+                  << (pruneGenerality ? ", after generality pruning" : "")
+                  << ")" << std::endl;
     }
     
     return result;
 }
 
-std::vector<Component> TemplateCache::LoadComponentsFromFile(const std::string& filePath, bool verbose) {
+// Canonicalise a template: find the symmetry/offset that minimises base/out hash
+std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int> TemplateCache::CanonicaliseTemplate(const ComponentTemplate& templ) {
+    uint64_t minHash = 0;
+    ComponentTemplate best = templ;
+    SymmetryTransform bestT = SymmetryTransform::Identity;
+    int bestDx = 0;
+    int bestDy = 0;
+
+    using enum SymmetryTransform;
+    for (auto transform : {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY,
+                           Rotate90, Rotate180OddBoth, Rotate270, ReflectAcrossYeqNegXP1}) {
+        ComponentTemplate t = templ.Transformed(transform);
+        auto bounds = t.base.IsEmpty() ? t.out.XYBounds() : t.base.XYBounds();
+        int dx = -bounds[0];
+        int dy = -bounds[1];
+        t = t.Moved({dx, dy});
+        uint64_t hash = combine_hashes(t.base.GetHash(), t.out.GetHash());
+        if (minHash == 0 || hash < minHash) {
+            minHash = hash;
+            best = t;
+            bestT = transform;
+            bestDx = dx;
+            bestDy = dy;
+        }
+    }
+    return {best, minHash, bestT, bestDx, bestDy};
+}
+
+inline bool PassesCostFilter(const std::string& inData, const std::string& outData,
+                             const std::unordered_map<std::string, SearchResult>* costDb) {
+    if (!costDb) return true;
+    auto itIn = costDb->find(inData);
+    auto itOut = costDb->find(outData);
+    if (itIn == costDb->end() || itOut == costDb->end()) return true;
+    bool tooSimplifying = itOut->second.cost + 12 < itIn->second.cost;
+    bool tooBasic = itIn->second.cost < 10 || itOut->second.cost < 10;
+    return !(tooSimplifying || tooBasic);
+}
+
+std::vector<Component> TemplateCache::LoadComponentsFromFile(const std::string& filePath, bool verbose,
+                                                  const std::unordered_map<std::string, SearchResult>* costDb) {
     std::vector<Component> components;
     
     if (verbose) {
@@ -291,6 +392,9 @@ std::vector<Component> TemplateCache::LoadComponentsFromFile(const std::string& 
               continue;
 
             if (inData.substr(0, 2) != "xs" || outData.substr(0, 2) != "xs")
+              continue;
+
+            if (!PassesCostFilter(inData, outData, costDb))
               continue;
 
             Component comp = Component::FromSJK(line);
