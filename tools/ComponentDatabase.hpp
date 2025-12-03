@@ -32,7 +32,8 @@ public:
   void LoadFromFiles(const std::vector<std::string>& filePaths, bool verbose = false);
   void LoadFromFile(const std::string& filePath, bool verbose = false);
   std::unordered_map<std::string, SearchResult> Dijkstra(const std::string& seed = "") const;
-  
+
+  bool InsertIfBetter(const std::string& precursorApgcode, unsigned cost, const std::string& targetApgcode, const std::string& compLine);
 };
 
 void ComponentDatabase::LoadFromFiles(const std::vector<std::string>& filePaths, bool verbose) {
@@ -74,6 +75,20 @@ void ComponentDatabase::LoadFromFile(const std::string& filePath, bool verbose) 
       continue;
     }
   }
+}
+
+bool ComponentDatabase::InsertIfBetter(const std::string& precursorApgcode,
+                      unsigned cost,
+                      const std::string& targetApgcode,
+                      const std::string& compLine) {
+  auto& vec = db[precursorApgcode];
+  for (const auto& entry : vec) {
+    if (std::get<1>(entry) == targetApgcode && std::get<0>(entry) <= cost) {
+      return false;
+    }
+  }
+  vec.emplace_back(cost, targetApgcode, compLine);
+  return true;
 }
 
 
@@ -141,4 +156,3 @@ std::vector<std::string> GetSJKFiles(const std::string& path) {
     
   return sjkFiles;
 }
-

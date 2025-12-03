@@ -646,7 +646,7 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx) {
       // Add to mini database as a seed
       {
         std::lock_guard<std::mutex> lock(ctx.miniDbMutex);
-        ctx.miniDb.db[""].emplace_back(it->second.cost, currentApgcode, ">>" + currentApgcode);
+        ctx.miniDb.InsertIfBetter("", it->second.cost, currentApgcode, ">>" + currentApgcode);
 
       }
       // if (it->second.cost + depth <= targetCost)
@@ -742,14 +742,14 @@ void TransferSynthesis::ProcessSynthesis(
   synthesis.component.ShiftToFitTorus();
   
   // Add synthesis to mini database
-  {
-    std::lock_guard<std::mutex> lock(ctx.miniDbMutex);
-    ctx.miniDb.db[synthesis.precursorApgcode].emplace_back(
-      synthesis.component.Cost(),
-      synthesis.targetApgcode,
-      synthesis.component.Realise().RLE()
-    );
-  }
+      {
+        std::lock_guard<std::mutex> lock(ctx.miniDbMutex);
+        ctx.miniDb.InsertIfBetter(
+            synthesis.precursorApgcode,
+            synthesis.component.Cost(),
+            synthesis.targetApgcode,
+            synthesis.component.Realise().RLE());
+      }
 
   // If we're at max depth, do database lookup immediately
   if (depth + 1 >= ctx.maxDepth) {
@@ -769,7 +769,7 @@ void TransferSynthesis::ProcessSynthesis(
         
       {
         std::lock_guard<std::mutex> lock(ctx.miniDbMutex);
-        ctx.miniDb.db[""].emplace_back(dbIt->second.cost, synthesis.precursorApgcode, "");
+        ctx.miniDb.InsertIfBetter("", dbIt->second.cost, synthesis.precursorApgcode, "");
       }
         
       {
@@ -808,7 +808,7 @@ void TransferSynthesis::AddDatabasePrecursors(
 
         {
           std::lock_guard<std::mutex> lock(ctx.miniDbMutex);
-          ctx.miniDb.db[precursorApgcode].emplace_back(cost, currentApgcode, "");
+          ctx.miniDb.InsertIfBetter(precursorApgcode, cost, currentApgcode, "");
         }
         
         LifeState precursorPattern = LifeState::DecodeApgcode(precursorApgcode);
