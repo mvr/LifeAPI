@@ -24,7 +24,7 @@
 template<typename T>
 class ThreadSafeQueue {
 private:
-    std::priority_queue<T, std::vector<T>, std::greater<T>> queue_;
+    std::priority_queue<T, std::deque<T>, std::greater<T>> queue_;
     mutable std::mutex mutex_;
     std::condition_variable condition_;
     std::atomic<int> waiting_threads_{0};
