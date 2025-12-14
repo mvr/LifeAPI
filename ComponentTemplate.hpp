@@ -62,7 +62,7 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
       throw std::runtime_error("Component took too long");
   }
 
-  LifeState glancing = ~everActive & everActive.ZOI() & (startCount.bit0 & ~startCount.bit1 & ~startCount.bit1);
+  LifeState glancing = ~everActive & everActive.ZOI() & (startCount.bit0 & ~startCount.bit1 & ~startCount.bit2);
 
   LifeState relevant = everActive.ZOI() & everDifferentNeighbours & everMoreThanOne & ~glancing;
 
