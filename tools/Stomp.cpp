@@ -158,6 +158,8 @@ public:
       int numThreads = 1,
       unsigned minTemplateOccurrences = 1,
       bool pruneGenerality = false,
+      int costSimplifySlack = 12,
+      int costMinOutput = 10,
       bool outputVisitedApgcodes = false,
       const std::string& cacheDir = "./template_cache",
       bool useCache = true,
@@ -442,6 +444,8 @@ void TransferSynthesis::RunSynthesis(
     int numThreads,
     unsigned minTemplateOccurrences,
     bool pruneGenerality,
+    int costSimplifySlack,
+    int costMinOutput,
     bool outputVisitedApgcodes,
     const std::string& cacheDir,
     bool useCache,
@@ -451,7 +455,7 @@ void TransferSynthesis::RunSynthesis(
   // Load component templates using cache
   TemplateCache templateCache;
   std::vector<ComponentTemplate> templates = templateCache.LoadTemplates(
-    transferComponentFiles, true, cacheDir, useCache, &minPaths);
+    transferComponentFiles, true, cacheDir, useCache, &minPaths, costSimplifySlack, costMinOutput);
   templates = TemplateCache::CombineAndDeduplicateTemplates(std::move(templates), minTemplateOccurrences, true, pruneGenerality);
   TemplateTree templateTree = BuildTemplateTree(templates, 8, 128, verbose, std::cerr, 0.0);
   if (verbose) {
@@ -983,6 +987,13 @@ int main(int argc, char* argv[]) {
     bool pruneGenerality = false;
     app.add_flag("--prune-template-generality", pruneGenerality, "Remove templates that are strictly less general within the same base/out");
 
+    int costSimplifySlack = 12;
+    int costMinOutput = 10;
+    app.add_option("--cost-simplify-slack", costSimplifySlack, "Maximum amount a component may reduce cost")
+        ->default_val(12);
+    app.add_option("--cost-min-output", costMinOutput, "Minimum component output cost")
+        ->default_val(10);
+
     bool outputVisitedApgcodes = false;
     app.add_flag("--output-visited-apgcodes", outputVisitedApgcodes, "Output all apgcodes that were ever processed in the search queue");
 
@@ -1199,6 +1210,8 @@ int main(int argc, char* argv[]) {
             numThreads,
             minTemplateOccurrences,
             pruneGenerality,
+            costSimplifySlack,
+            costMinOutput,
             outputVisitedApgcodes,
             cacheDir,
             !noCache,
