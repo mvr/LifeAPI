@@ -2,7 +2,6 @@
 #include <vector>
 #include <string>
 #include <fstream>
-#include <filesystem>
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
@@ -469,7 +468,7 @@ void TransferSynthesis::RunSynthesis(
 
   // Load component templates using cache
   TemplateCache templateCache;
-  std::vector<ComponentTemplate> templates = templateCache.LoadTemplates(
+  std::vector<ComponentTemplate> templates = templateCache.LoadTemplatesFromFiles(
     transferComponentFiles, true, cacheDir, useCache);
   if (!templates.empty()) {
     std::vector<ComponentTemplate> filtered;
@@ -1052,9 +1051,6 @@ int main(int argc, char* argv[]) {
     bool noCache = false;
     app.add_flag("--no-cache", noCache, "Disable template caching");
     
-    bool clearCache = false;
-    app.add_flag("--clear-cache", clearCache, "Clear template cache and exit");
-    
     // Mutually exclusive target selection
     auto target_group = app.add_option_group("target_selection", "Target selection (exactly one required)");
     
@@ -1126,18 +1122,6 @@ int main(int argc, char* argv[]) {
     }
     
     try {
-        // Handle clear cache option
-        if (clearCache) {
-            TemplateCache cache;
-            if (cache.ClearCache(cacheDir)) {
-                std::cerr << "Template cache cleared: " << cacheDir << std::endl;
-            } else {
-                std::cerr << "Failed to clear template cache: " << cacheDir << std::endl;
-                return 1;
-            }
-            return 0;
-        }
-        
         // Get list of transfer component files
         std::vector<std::string> transferComponentFiles = GetSJKFiles(componentsPath);
         

@@ -9,36 +9,19 @@
 #include <filesystem>
 #include <iostream>
 #include <chrono>
-#include <iomanip>
 
 #include "../Component.hpp"
 #include "../ComponentTemplate.hpp"
-#include "ComponentDatabase.hpp"
 
 class TemplateCache {
 public:
-    // Main interface - load templates with per-file caching
-    std::vector<ComponentTemplate> LoadTemplates(
+    // Batch interface
+    std::vector<ComponentTemplate> LoadTemplatesFromFiles(
         const std::vector<std::string>& filePaths,
         bool verbose = false,
         const std::string& cacheDir = "./template_cache",
         bool useCache = true);
-    
-    // Cache management
-    bool ClearCache(const std::string& cacheDir = "./template_cache");
-    
-    // Per-file template extraction
-    std::vector<ComponentTemplate> ExtractTemplatesFromFile(
-        const std::string& filePath,
-        bool verbose = false);
-    
-    // Load templates from a single file with caching
-    std::vector<ComponentTemplate> LoadTemplatesFromFile(
-        const std::string& filePath,
-        const std::string& cacheDir,
-        bool useCache,
-        bool verbose = false);
-    
+
     // Combine and deduplicate templates from multiple files
     static std::vector<ComponentTemplate> CombineAndDeduplicateTemplates(
         std::vector<ComponentTemplate> templates,
@@ -46,22 +29,28 @@ public:
         bool verbose = false,
         bool pruneGenerality = false);
 
-    // Canonicalise a template by trying all symmetries, returning the minimising transform and offset
-    static std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int> CanonicaliseTemplate(const ComponentTemplate& templ);
-    
-    // Cache helper methods
+    // Per-file cache access
+    std::vector<ComponentTemplate> LoadTemplatesFromCacheOrFile(
+        const std::string& filePath,
+        const std::string& cacheDir,
+        bool verbose = false);
     std::string GenerateCacheKeyForFile(const std::string& filePath);
-    bool LoadTemplatesFromCache(const std::string& cacheFile, std::vector<ComponentTemplate>& templates);
-    void SaveTemplatesToCache(const std::string& cacheFile, const std::vector<ComponentTemplate>& templates);
+    bool ReadTemplatesCacheFile(const std::string& cacheFile, std::vector<ComponentTemplate>& templates);
+    void WriteTemplatesCacheFile(const std::string& cacheFile, const std::vector<ComponentTemplate>& templates);
     
+    // Per-file template extraction
+    std::vector<ComponentTemplate> ExtractTemplatesFromComponentsFile(
+        const std::string& filePath,
+        bool verbose = false);
+
     // Component loading from single file
-    std::vector<Component> LoadComponentsFromFile(const std::string& filePath,
+    std::vector<Component> ReadComponentsFromFile(const std::string& filePath,
                                                   bool verbose = false);
 };
 
 // Implementation
 
-std::vector<ComponentTemplate> TemplateCache::LoadTemplates(
+std::vector<ComponentTemplate> TemplateCache::LoadTemplatesFromFiles(
     const std::vector<std::string>& filePaths,
     bool verbose,
     const std::string& cacheDir,
@@ -74,7 +63,7 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplates(
         // Load templates from each file without caching
         std::vector<ComponentTemplate> combined;
         for (const auto& filePath : filePaths) {
-            std::vector<ComponentTemplate> fileTemplates = ExtractTemplatesFromFile(filePath, verbose);
+            std::vector<ComponentTemplate> fileTemplates = ExtractTemplatesFromComponentsFile(filePath, verbose);
             combined.insert(combined.end(),
                             std::make_move_iterator(fileTemplates.begin()),
                             std::make_move_iterator(fileTemplates.end()));
@@ -92,7 +81,7 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplates(
     // Load templates from each file individually (with per-file caching)
     std::vector<std::vector<ComponentTemplate>> allFileTemplates;
     for (const auto& filePath : filePaths) {
-        std::vector<ComponentTemplate> fileTemplates = LoadTemplatesFromFile(filePath, cacheDir, useCache, verbose);
+        std::vector<ComponentTemplate> fileTemplates = LoadTemplatesFromCacheOrFile(filePath, cacheDir, verbose);
         allFileTemplates.push_back(fileTemplates);
     }
     
@@ -104,108 +93,6 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplates(
                         std::make_move_iterator(vec.end()));
     }
     return combined;
-}
-
-bool TemplateCache::ClearCache(const std::string& cacheDir) {
-    try {
-        if (std::filesystem::exists(cacheDir)) {
-            std::filesystem::remove_all(cacheDir);
-            return true;
-        }
-        return true; // Already cleared
-    } catch (const std::exception&) {
-        return false;
-    }
-}
-
-std::vector<ComponentTemplate> TemplateCache::ExtractTemplatesFromFile(
-    const std::string& filePath,
-    bool verbose) {
-    
-    if (verbose) {
-        std::cerr << "Extracting templates from " << filePath << std::endl;
-    }
-    
-    // Load components from single file
-    std::vector<Component> components = LoadComponentsFromFile(filePath, verbose);
-    
-    // Extract unique templates (no occurrence filtering at file level)
-    std::unordered_map<uint64_t, ComponentTemplate> uniqueTemplates;
-    
-    for (const Component& comp : components) {
-        try {
-            if (!comp.IsUseful()) {
-                if (verbose) {
-                    std::cerr << "Skipping non-useful component: " << comp.Realise() << std::endl;
-                }
-                continue;
-            }
-            
-            ComponentTemplate templ = ComponentTemplate::FromComponent(comp);
-            uniqueTemplates[templ.GetHash()] = templ;
-
-        } catch (const std::exception& e) {
-            if (verbose) {
-                std::cerr << "Error processing component: " << e.what() << std::endl;
-            }
-        }
-    }
-    
-    // Convert to vector
-    std::vector<ComponentTemplate> result;
-    for (const auto& [hash, templ] : uniqueTemplates) {
-        result.push_back(templ);
-    }
-    
-    if (verbose) {
-        std::cerr << "Extracted " << result.size() << " unique templates from " 
-                  << components.size() << " components in " << filePath << std::endl;
-    }
-    
-    return result;
-}
-
-std::vector<ComponentTemplate> TemplateCache::LoadTemplatesFromFile(
-    const std::string& filePath,
-    const std::string& cacheDir,
-    bool useCache,
-    bool verbose) {
-    
-    if (!useCache) {
-        return ExtractTemplatesFromFile(filePath, verbose);
-    }
-    
-    std::string cacheKey = GenerateCacheKeyForFile(filePath);
-    std::string cacheFile = cacheDir + "/file_" + cacheKey + ".bin";
-    
-    std::vector<ComponentTemplate> templates;
-    if (std::filesystem::exists(cacheFile)) {
-        if (verbose) {
-            std::cerr << "Loading templates from cache for " << filePath << std::endl;
-        }
-        
-        if (LoadTemplatesFromCache(cacheFile, templates)) {
-            if (verbose) {
-                std::cerr << "Loaded " << templates.size() << " cached templates from " << filePath << std::endl;
-            }
-            return templates;
-        } else {
-            if (verbose) {
-                std::cerr << "Cache load failed for " << filePath << ", regenerating" << std::endl;
-            }
-        }
-    } else if (verbose) {
-        std::cerr << "No cache found for " << filePath << ", generating templates" << std::endl;
-    }
-    
-    templates = ExtractTemplatesFromFile(filePath, verbose);
-    
-    if (verbose) {
-        std::cerr << "Caching " << templates.size() << " templates for " << filePath << std::endl;
-    }
-    SaveTemplatesToCache(cacheFile, templates);
-    
-    return templates;
 }
 
 std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
@@ -302,62 +189,42 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
     return result;
 }
 
-std::vector<Component> TemplateCache::LoadComponentsFromFile(const std::string& filePath, bool verbose) {
-    std::vector<Component> components;
+std::vector<ComponentTemplate> TemplateCache::LoadTemplatesFromCacheOrFile(
+    const std::string& filePath,
+    const std::string& cacheDir,
+    bool verbose) {
     
-    if (verbose) {
-        std::cerr << "Reading components from " << filePath << std::endl;
-    }
+    std::string cacheKey = GenerateCacheKeyForFile(filePath);
+    std::string cacheFile = cacheDir + "/file_" + cacheKey + ".bin";
     
-    std::ifstream file(filePath);
-    if (!file.is_open()) {
+    std::vector<ComponentTemplate> templates;
+    if (std::filesystem::exists(cacheFile)) {
         if (verbose) {
-            std::cerr << "Warning: Could not open " << filePath << std::endl;
-        }
-        return components;
-    }
-    
-    std::string line;
-    while (std::getline(file, line)) {
-        // Remove comments and trim
-        size_t commentPos = line.find('#');
-        if (commentPos != std::string::npos) {
-            line = line.substr(0, commentPos);
+            std::cerr << "Loading templates from cache for " << filePath << std::endl;
         }
         
-        // Trim whitespace
-        line.erase(line.find_last_not_of(" \t\r\n") + 1);
-        line.erase(0, line.find_first_not_of(" \t\r\n"));
-        
-        if (line.empty()) continue;
-        
-        try {
-            // Check apgcodes before creating component
-            auto [inData, gliderData, outData] = Component::SplitSJKLine(line);
-
-            if (inData.empty() || outData.empty())
-              continue;
-
-            if (inData == outData)
-              continue;
-
-            if (inData.substr(0, 2) != "xs" || outData.substr(0, 2) != "xs")
-              continue;
-
-            Component comp = Component::FromSJK(line);
-            components.push_back(comp);
-        } catch (const std::exception& e) {
+        if (ReadTemplatesCacheFile(cacheFile, templates)) {
             if (verbose) {
-                std::cerr << "Error parsing component line " << line << ": " << e.what() << std::endl;
+                std::cerr << "Loaded " << templates.size() << " cached templates from " << filePath << std::endl;
+            }
+            return templates;
+        } else {
+            if (verbose) {
+                std::cerr << "Cache load failed for " << filePath << ", regenerating" << std::endl;
             }
         }
+    } else if (verbose) {
+        std::cerr << "No cache found for " << filePath << ", generating templates" << std::endl;
     }
+    
+    templates = ExtractTemplatesFromComponentsFile(filePath, verbose);
     
     if (verbose) {
-        std::cerr << "Loaded " << components.size() << " components from " << filePath << std::endl;
+        std::cerr << "Caching " << templates.size() << " templates for " << filePath << std::endl;
     }
+    WriteTemplatesCacheFile(cacheFile, templates);
     
-    return components;
+    return templates;
 }
 
 std::string TemplateCache::GenerateCacheKeyForFile(const std::string& filePath) {
@@ -379,7 +246,7 @@ std::string TemplateCache::GenerateCacheKeyForFile(const std::string& filePath) 
     return hexStream.str();
 }
 
-bool TemplateCache::LoadTemplatesFromCache(const std::string& cacheFile, std::vector<ComponentTemplate>& templates) {
+bool TemplateCache::ReadTemplatesCacheFile(const std::string& cacheFile, std::vector<ComponentTemplate>& templates) {
     try {
         std::ifstream file(cacheFile, std::ios::binary);
         if (!file.is_open()) {
@@ -480,7 +347,7 @@ bool TemplateCache::LoadTemplatesFromCache(const std::string& cacheFile, std::ve
     }
 }
 
-void TemplateCache::SaveTemplatesToCache(const std::string& cacheFile, const std::vector<ComponentTemplate>& templates) {
+void TemplateCache::WriteTemplatesCacheFile(const std::string& cacheFile, const std::vector<ComponentTemplate>& templates) {
     try {
         std::ofstream file(cacheFile, std::ios::binary);
         if (!file.is_open()) {
@@ -556,3 +423,107 @@ void TemplateCache::SaveTemplatesToCache(const std::string& cacheFile, const std
     }
 }
 
+std::vector<ComponentTemplate> TemplateCache::ExtractTemplatesFromComponentsFile(
+    const std::string& filePath,
+    bool verbose) {
+    
+    if (verbose) {
+        std::cerr << "Extracting templates from " << filePath << std::endl;
+    }
+    
+    // Load components from single file
+    std::vector<Component> components = ReadComponentsFromFile(filePath, verbose);
+    
+    // Extract unique templates (no occurrence filtering at file level)
+    std::unordered_map<uint64_t, ComponentTemplate> uniqueTemplates;
+    
+    for (const Component& comp : components) {
+        try {
+            if (!comp.IsUseful()) {
+                if (verbose) {
+                    std::cerr << "Skipping non-useful component: " << comp.Realise() << std::endl;
+                }
+                continue;
+            }
+            
+            ComponentTemplate templ = ComponentTemplate::FromComponent(comp);
+            uniqueTemplates[templ.GetHash()] = templ;
+
+        } catch (const std::exception& e) {
+            if (verbose) {
+                std::cerr << "Error processing component: " << e.what() << std::endl;
+            }
+        }
+    }
+    
+    // Convert to vector
+    std::vector<ComponentTemplate> result;
+    for (const auto& [hash, templ] : uniqueTemplates) {
+        result.push_back(templ);
+    }
+    
+    if (verbose) {
+        std::cerr << "Extracted " << result.size() << " unique templates from " 
+                  << components.size() << " components in " << filePath << std::endl;
+    }
+    
+    return result;
+}
+
+std::vector<Component> TemplateCache::ReadComponentsFromFile(const std::string& filePath, bool verbose) {
+    std::vector<Component> components;
+    
+    if (verbose) {
+        std::cerr << "Reading components from " << filePath << std::endl;
+    }
+    
+    std::ifstream file(filePath);
+    if (!file.is_open()) {
+        if (verbose) {
+            std::cerr << "Warning: Could not open " << filePath << std::endl;
+        }
+        return components;
+    }
+    
+    std::string line;
+    while (std::getline(file, line)) {
+        // Remove comments and trim
+        size_t commentPos = line.find('#');
+        if (commentPos != std::string::npos) {
+            line = line.substr(0, commentPos);
+        }
+        
+        // Trim whitespace
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        line.erase(0, line.find_first_not_of(" \t\r\n"));
+        
+        if (line.empty()) continue;
+        
+        try {
+            // Check apgcodes before creating component
+            auto [inData, gliderData, outData] = Component::SplitSJKLine(line);
+
+            if (inData.empty() || outData.empty())
+              continue;
+
+            if (inData == outData)
+              continue;
+
+            if (inData.substr(0, 2) != "xs" || outData.substr(0, 2) != "xs")
+              continue;
+
+            Component comp = Component::FromSJK(line);
+            components.push_back(comp);
+        } catch (const std::exception& e) {
+            if (verbose) {
+                std::cerr << "Error parsing component line " << line << ": " << e.what() << std::endl;
+            }
+        }
+    }
+    
+    if (verbose) {
+        std::cerr << "Loaded " << components.size() << " components from " << filePath << std::endl;
+    }
+    
+    return components;
+}
