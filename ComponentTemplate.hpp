@@ -26,6 +26,8 @@ struct ComponentTemplate {
   void NormalisePosition();
   // Try to shift glider set to fit in 64x64 torus without wrapping
   void ShiftToFitTorus();
+  // Canonicalise a template: find the symmetry/offset that minimises base/out hash
+  std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int> Canonicalise() const;
 
   uint64_t GetHashNonSymmetrised() const;
   uint64_t GetHash() const;
@@ -157,6 +159,33 @@ void ComponentTemplate::NormalisePosition() {
 void ComponentTemplate::ShiftToFitTorus() {
   auto offset = gliderSet.OffsetToFitTorus();
   *this = Moved(offset);
+}
+
+std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int> ComponentTemplate::Canonicalise() const {
+    uint64_t minHash = 0;
+    ComponentTemplate best = *this;
+    SymmetryTransform bestT = SymmetryTransform::Identity;
+    int bestDx = 0;
+    int bestDy = 0;
+
+    using enum SymmetryTransform;
+    for (auto transform : {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY,
+                           Rotate90, Rotate180OddBoth, Rotate270, ReflectAcrossYeqNegXP1}) {
+        ComponentTemplate t = this->Transformed(transform);
+        auto bounds = t.base.IsEmpty() ? t.out.XYBounds() : t.base.XYBounds();
+        int dx = -bounds[0];
+        int dy = -bounds[1];
+        t = t.Moved({dx, dy});
+        uint64_t hash = combine_hashes(t.base.GetHash(), t.out.GetHash());
+        if (minHash == 0 || hash < minHash) {
+            minHash = hash;
+            best = t;
+            bestT = transform;
+            bestDx = dx;
+            bestDy = dy;
+        }
+    }
+    return {best, minHash, bestT, bestDx, bestDy};
 }
 
 uint64_t ComponentTemplate::GetHashNonSymmetrised() const {
