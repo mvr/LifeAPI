@@ -71,6 +71,7 @@ LifeHistory LifeHistory::Parse(const std::string &rle) {
   return GenericParse<LifeHistory>(rle, [&](LifeHistory &result, char ch, int x, int y) -> void {
     switch(ch) {
     case 'A':
+    case 'o':
       result.state.Set(x, y);
       break;
     case 'B':
