@@ -151,6 +151,7 @@ public:
       const std::vector<std::string> &transferComponentFiles,
       const std::vector<std::string> &objects,
       const std::unordered_map<std::string, SearchResult> &minPaths,
+      const std::unordered_set<std::string> &forbiddenApgcodes,
       int maxDepth = 1,
       int maxPrecursorPop = 30,
       bool skipExisting = false,
@@ -179,6 +180,7 @@ private:
     const TemplateTree& templateTree;
     const std::unordered_map<std::string, SearchResult>& minPaths;
     const std::unordered_map<std::string, std::vector<std::tuple<unsigned, std::string, std::string>>>& reverseLookup;
+    const std::unordered_set<std::string>& forbiddenApgcodes;
     
     // Configuration
     int maxDepth;
@@ -437,6 +439,7 @@ void TransferSynthesis::RunSynthesis(
     const std::vector<std::string> &transferComponentFiles,
     const std::vector<std::string> &objects,
     const std::unordered_map<std::string, SearchResult> &minPaths,
+    const std::unordered_set<std::string> &forbiddenApgcodes,
     int maxDepth,
     int maxPrecursorPop,
     bool skipExisting,
@@ -538,6 +541,7 @@ void TransferSynthesis::RunSynthesis(
       .templateTree = templateTree,
       .minPaths = minPaths,
       .reverseLookup = reverseLookup,
+      .forbiddenApgcodes = forbiddenApgcodes,
       .maxDepth = maxDepth,
       .maxPrecursorPop = maxPrecursorPop,
       .outputVisitedApgcodes = outputVisitedApgcodes,
@@ -631,6 +635,10 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx) {
     }
     
     auto [population, depth, currentApgcode] = entry;
+
+    if (ctx.forbiddenApgcodes.contains(currentApgcode)) {
+      continue;
+    }
     
     // Collect apgcode if output is enabled
     if (ctx.outputVisitedApgcodes) {
@@ -723,6 +731,10 @@ void TransferSynthesis::ProcessSynthesis(
     SearchContext& ctx,
     int depth) {
 
+  if (ctx.forbiddenApgcodes.contains(synthesis.precursorApgcode)) {
+    return;
+  }
+
   int maxPop = depth == ctx.maxDepth - 1 ? std::numeric_limits<int>::max() : ctx.maxPrecursorPop;
   if (synthesis.component.base.GetPop() > maxPop) {
     auto components = synthesis.component.base.StillComponents();
@@ -810,6 +822,9 @@ void TransferSynthesis::AddDatabasePrecursors(
   auto reverseIt = ctx.reverseLookup.find(currentApgcode);
   if (reverseIt != ctx.reverseLookup.end()) {
     for (const auto& [cost, precursorApgcode, compLine] : reverseIt->second) {
+      if (ctx.forbiddenApgcodes.contains(precursorApgcode)) {
+        continue;
+      }
       try {
         auto [inData, gliderData, outData] = Component::SplitSJKLine(compLine);
 
@@ -997,6 +1012,10 @@ int main(int argc, char* argv[]) {
     bool outputVisitedApgcodes = false;
     app.add_flag("--output-visited-apgcodes", outputVisitedApgcodes, "Output all apgcodes that were ever processed in the search queue");
 
+    std::string forbiddenApgcodesFile;
+    app.add_option("--forbidden-apgcodes", forbiddenApgcodesFile,
+        "File containing apgcodes to ignore during search (one per line, '#' comments allowed)");
+
     // Template caching options
     std::string cacheDir = "./template_cache";
     app.add_option("--cache-dir", cacheDir, "Directory for template cache")
@@ -1119,6 +1138,14 @@ int main(int argc, char* argv[]) {
         std::unordered_map<std::string, SearchResult> dijkstraResults;
         std::vector<std::string> targets;
         std::unordered_map<std::string, std::vector<std::tuple<unsigned, std::string, std::string>>> reverseLookup;
+        std::unordered_set<std::string> forbiddenApgcodes;
+
+        if (!forbiddenApgcodesFile.empty()) {
+          for (const auto& apgcode : TransferSynthesis::ReadTargetFile(forbiddenApgcodesFile)) {
+            forbiddenApgcodes.insert(apgcode);
+          }
+          std::cerr << "Loaded " << forbiddenApgcodes.size() << " forbidden apgcodes" << std::endl;
+        }
 
         {
           ComponentDatabase costDb;
@@ -1203,6 +1230,7 @@ int main(int argc, char* argv[]) {
             transferComponentFiles,
             targets,
             dijkstraResults,
+            forbiddenApgcodes,
             maxDepth,
             maxPrecursorPop,
             skipExisting,
