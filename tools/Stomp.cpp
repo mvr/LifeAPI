@@ -458,7 +458,23 @@ void TransferSynthesis::RunSynthesis(
   // Load component templates using cache
   TemplateCache templateCache;
   std::vector<ComponentTemplate> templates = templateCache.LoadTemplates(
-    transferComponentFiles, true, cacheDir, useCache, &minPaths, costSimplifySlack, costMinOutput);
+    transferComponentFiles, true, cacheDir, useCache);
+  if (!templates.empty()) {
+    std::vector<ComponentTemplate> filtered;
+    filtered.reserve(templates.size());
+    for (const auto& templ : templates) {
+      std::string inData = templ.base.EncodeApgcode();
+      std::string outData = templ.out.EncodeApgcode();
+      if (PassesCostFilter(inData, outData, &minPaths, costSimplifySlack, costMinOutput)) {
+        filtered.push_back(templ);
+      }
+    }
+    if (verbose) {
+      std::cerr << "Cost-filtered templates: " << templates.size()
+                << " -> " << filtered.size() << std::endl;
+    }
+    templates = std::move(filtered);
+  }
   templates = TemplateCache::CombineAndDeduplicateTemplates(std::move(templates), minTemplateOccurrences, true, pruneGenerality);
   TemplateTree templateTree = BuildTemplateTree(templates, 8, 128, verbose, std::cerr, 0.0);
   if (verbose) {

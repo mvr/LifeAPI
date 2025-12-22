@@ -22,10 +22,7 @@ public:
         const std::vector<std::string>& filePaths,
         bool verbose = false,
         const std::string& cacheDir = "./template_cache",
-        bool useCache = true,
-        const std::unordered_map<std::string, SearchResult>* costDb = nullptr,
-        int simplifySlack = 12,
-        int minOutputCost = 10);
+        bool useCache = true);
     
     // Cache management
     bool ClearCache(const std::string& cacheDir = "./template_cache");
@@ -36,20 +33,14 @@ public:
     // Per-file template extraction
     std::vector<ComponentTemplate> ExtractTemplatesFromFile(
         const std::string& filePath,
-        bool verbose = false,
-        const std::unordered_map<std::string, SearchResult>* costDb = nullptr,
-        int simplifySlack = 12,
-        int minOutputCost = 10);
+        bool verbose = false);
     
     // Load templates from a single file with caching
     std::vector<ComponentTemplate> LoadTemplatesFromFile(
         const std::string& filePath,
         const std::string& cacheDir,
         bool useCache,
-        bool verbose = false,
-        const std::unordered_map<std::string, SearchResult>* costDb = nullptr,
-        int simplifySlack = 12,
-        int minOutputCost = 10);
+        bool verbose = false);
     
     // Combine and deduplicate templates from multiple files
     static std::vector<ComponentTemplate> CombineAndDeduplicateTemplates(
@@ -68,10 +59,7 @@ public:
     
     // Component loading from single file
     std::vector<Component> LoadComponentsFromFile(const std::string& filePath,
-                                                  bool verbose = false,
-                                                  const std::unordered_map<std::string, SearchResult>* costDb = nullptr,
-                                                  int simplifySlack = 12,
-                                                  int minOutputCost = 10);
+                                                  bool verbose = false);
 };
 
 // Implementation
@@ -80,10 +68,7 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplates(
     const std::vector<std::string>& filePaths,
     bool verbose,
     const std::string& cacheDir,
-    bool useCache,
-    const std::unordered_map<std::string, SearchResult>* costDb,
-    int simplifySlack,
-    int minOutputCost) {
+    bool useCache) {
 
     if (!useCache) {
         if (verbose) {
@@ -92,7 +77,7 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplates(
         // Load templates from each file without caching
         std::vector<ComponentTemplate> combined;
         for (const auto& filePath : filePaths) {
-            std::vector<ComponentTemplate> fileTemplates = ExtractTemplatesFromFile(filePath, verbose, costDb, simplifySlack, minOutputCost);
+            std::vector<ComponentTemplate> fileTemplates = ExtractTemplatesFromFile(filePath, verbose);
             combined.insert(combined.end(),
                             std::make_move_iterator(fileTemplates.begin()),
                             std::make_move_iterator(fileTemplates.end()));
@@ -110,7 +95,7 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplates(
     // Load templates from each file individually (with per-file caching)
     std::vector<std::vector<ComponentTemplate>> allFileTemplates;
     for (const auto& filePath : filePaths) {
-        std::vector<ComponentTemplate> fileTemplates = LoadTemplatesFromFile(filePath, cacheDir, useCache, verbose, costDb, simplifySlack, minOutputCost);
+        std::vector<ComponentTemplate> fileTemplates = LoadTemplatesFromFile(filePath, cacheDir, useCache, verbose);
         allFileTemplates.push_back(fileTemplates);
     }
     
@@ -138,17 +123,14 @@ bool TemplateCache::ClearCache(const std::string& cacheDir) {
 
 std::vector<ComponentTemplate> TemplateCache::ExtractTemplatesFromFile(
     const std::string& filePath,
-    bool verbose,
-    const std::unordered_map<std::string, SearchResult>* costDb,
-    int simplifySlack,
-    int minOutputCost) {
+    bool verbose) {
     
     if (verbose) {
         std::cerr << "Extracting templates from " << filePath << std::endl;
     }
     
     // Load components from single file
-    std::vector<Component> components = LoadComponentsFromFile(filePath, verbose, costDb, simplifySlack, minOutputCost);
+    std::vector<Component> components = LoadComponentsFromFile(filePath, verbose);
     
     // Extract unique templates (no occurrence filtering at file level)
     std::unordered_map<uint64_t, ComponentTemplate> uniqueTemplates;
@@ -190,13 +172,10 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplatesFromFile(
     const std::string& filePath,
     const std::string& cacheDir,
     bool useCache,
-    bool verbose,
-    const std::unordered_map<std::string, SearchResult>* costDb,
-    int simplifySlack,
-    int minOutputCost) {
+    bool verbose) {
     
     if (!useCache) {
-        return ExtractTemplatesFromFile(filePath, verbose, costDb, simplifySlack, minOutputCost);
+        return ExtractTemplatesFromFile(filePath, verbose);
     }
     
     std::string cacheKey = GenerateCacheKeyForFile(filePath);
@@ -222,7 +201,7 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplatesFromFile(
         std::cerr << "No cache found for " << filePath << ", generating templates" << std::endl;
     }
     
-    templates = ExtractTemplatesFromFile(filePath, verbose, costDb, simplifySlack, minOutputCost);
+    templates = ExtractTemplatesFromFile(filePath, verbose);
     
     if (verbose) {
         std::cerr << "Caching " << templates.size() << " templates for " << filePath << std::endl;
@@ -367,10 +346,7 @@ inline bool PassesCostFilter(const std::string& inData, const std::string& outDa
     return !(tooSimplifying || tooBasic);
 }
 
-std::vector<Component> TemplateCache::LoadComponentsFromFile(const std::string& filePath, bool verbose,
-                                                  const std::unordered_map<std::string, SearchResult>* costDb,
-                                                  int simplifySlack,
-                                                  int minOutputCost) {
+std::vector<Component> TemplateCache::LoadComponentsFromFile(const std::string& filePath, bool verbose) {
     std::vector<Component> components;
     
     if (verbose) {
@@ -410,9 +386,6 @@ std::vector<Component> TemplateCache::LoadComponentsFromFile(const std::string& 
               continue;
 
             if (inData.substr(0, 2) != "xs" || outData.substr(0, 2) != "xs")
-              continue;
-
-            if (!PassesCostFilter(inData, outData, costDb, simplifySlack, minOutputCost))
               continue;
 
             Component comp = Component::FromSJK(line);
