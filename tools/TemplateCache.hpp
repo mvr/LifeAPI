@@ -261,7 +261,7 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
 
     std::unordered_map<uint64_t, std::vector<ComponentTemplate>> groups;
     for (const auto& templ : candidates) {
-        auto [canon, hash, t, dx, dy] = CanonicaliseTemplate(templ);
+        auto [canon, hash, t, dx, dy] = templ.Canonicalise();
         (void)t; (void)dx; (void)dy;
         groups[hash].push_back(std::move(canon));
     }
@@ -303,47 +303,6 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
     }
     
     return result;
-}
-
-// Canonicalise a template: find the symmetry/offset that minimises base/out hash
-std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int> TemplateCache::CanonicaliseTemplate(const ComponentTemplate& templ) {
-    uint64_t minHash = 0;
-    ComponentTemplate best = templ;
-    SymmetryTransform bestT = SymmetryTransform::Identity;
-    int bestDx = 0;
-    int bestDy = 0;
-
-    using enum SymmetryTransform;
-    for (auto transform : {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY,
-                           Rotate90, Rotate180OddBoth, Rotate270, ReflectAcrossYeqNegXP1}) {
-        ComponentTemplate t = templ.Transformed(transform);
-        auto bounds = t.base.IsEmpty() ? t.out.XYBounds() : t.base.XYBounds();
-        int dx = -bounds[0];
-        int dy = -bounds[1];
-        t = t.Moved({dx, dy});
-        uint64_t hash = combine_hashes(t.base.GetHash(), t.out.GetHash());
-        if (minHash == 0 || hash < minHash) {
-            minHash = hash;
-            best = t;
-            bestT = transform;
-            bestDx = dx;
-            bestDy = dy;
-        }
-    }
-    return {best, minHash, bestT, bestDx, bestDy};
-}
-
-inline bool PassesCostFilter(const std::string& inData, const std::string& outData,
-                             const std::unordered_map<std::string, SearchResult>* costDb,
-                             int simplifySlack,
-                             int minOutputCost) {
-    if (!costDb) return true;
-    auto itIn = costDb->find(inData);
-    auto itOut = costDb->find(outData);
-    if (itIn == costDb->end() || itOut == costDb->end()) return true;
-    bool tooSimplifying = static_cast<int>(itOut->second.cost) + simplifySlack < static_cast<int>(itIn->second.cost);
-    bool tooBasic = static_cast<int>(itOut->second.cost) < minOutputCost;
-    return !(tooSimplifying || tooBasic);
 }
 
 std::vector<Component> TemplateCache::LoadComponentsFromFile(const std::string& filePath, bool verbose) {

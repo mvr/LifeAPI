@@ -434,6 +434,18 @@ bool TransferSynthesis::IsPromising(const SynthesisResult& synthesis) {
   return true;
 }
 
+inline bool PassesCostFilter(const std::string& inData, const std::string& outData,
+                             const std::unordered_map<std::string, SearchResult>* costDb,
+                             int simplifySlack,
+                             int minOutputCost) {
+    if (!costDb) return true;
+    auto itIn = costDb->find(inData);
+    auto itOut = costDb->find(outData);
+    if (itIn == costDb->end() || itOut == costDb->end()) return true;
+    bool tooSimplifying = static_cast<int>(itOut->second.cost) + simplifySlack < static_cast<int>(itIn->second.cost);
+    bool tooBasic = static_cast<int>(itOut->second.cost) < minOutputCost;
+    return !(tooSimplifying || tooBasic);
+}
 
 void TransferSynthesis::RunSynthesis(
     const std::vector<std::string> &transferComponentFiles,
