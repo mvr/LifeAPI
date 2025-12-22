@@ -69,6 +69,7 @@ struct Component {
 
   inline static LifeState BaseGlider(int steps);
   inline static LifeState RunComponentOutcome(const LifeState& base, const GliderSet& gliders);
+  inline bool IsUseful() const;
 };
 
 
@@ -547,6 +548,112 @@ LifeState Component::RunComponentOutcome(const LifeState& base, const GliderSet&
     if (out == prev) break;
   }
   return out;
+}
+
+bool Component::IsUseful() const{
+  // We can't handle pure cleanup steps
+  if ((out & ~base).IsEmpty()) {
+    LifeState deletion = base & ~out;
+    if(deletion == base.StillComponentContaining(deletion))
+      return false;
+  }
+
+  // Filter out components where all input still lifes are small
+  // (these are likely syntheses replicating soups)
+  auto baseComponents = base.StillComponents();
+  if (baseComponents.size() > 0) {
+    bool hasLargeComponent = false;
+    for (const auto& component : baseComponents) {
+      if (component.GetPop() > 6) {
+        hasLargeComponent = true;
+        break;
+      }
+    }
+    if (!hasLargeComponent) {
+      return false;
+    }
+  }
+
+  // // Filter out components which create a new small still life
+  // auto outComponents = out.StillComponents();
+  // if (outComponents.size() > 1) {
+  //   for (const auto& component : outComponents) {
+  //     if (!(component & ~base).IsEmpty() && component.GetPop() <= 8) {
+  //       return false;
+  //     }
+  //   }
+  // }
+
+    LifeState state = Realise();
+    LifeState everActive;
+    unsigned gen = 0;
+
+    bool done = false;
+    while (!done) {
+        LifeState prev = state;
+        everActive |= state ^ base;
+        state.Step();
+        gen++;
+        if (state == prev)
+            done = true;
+        if (gen > 300)
+          return false;
+    }
+
+    // Require some fraction of the base to remain inactive
+    {
+        static constexpr double minInactiveFraction = 0.3;
+        unsigned basePop = base.GetPop();
+        if (basePop > 0) {
+            unsigned inactivePop = (base & ~everActive).GetPop();
+            if (inactivePop < minInactiveFraction * basePop) {
+                return false;
+            }
+        }
+    }
+
+    // Filter out components which cause disconnected changes
+    auto diffComponents = everActive.Components(LifeState::ConstantParse("5o$5o$5o$5o$5o!", -2, -2));
+    if (diffComponents.size() > 1) {
+        return false;
+    }
+
+    // Boat-bit filter: if a glider only creates a boat, drop the component
+    static const LifeState boatOrients[4] = {
+        LifeState::ConstantParse("b2o$obo$bo!"),
+        LifeState::ConstantParse("bo$obo$b2o!"),
+        LifeState::ConstantParse("bo$obo$2o!"),
+        LifeState::ConstantParse("2o$obo$bo!"),
+    };
+
+    LifeState boatMask;
+    LifeState boatMaskInBase;
+    for (const auto& boat : boatOrients) {
+        LifeState matchesOut = out.MatchLive(boat);
+        for (auto [x, y] : matchesOut.OnCells()) {
+            boatMask |= boat.Moved(x, y);
+        }
+        LifeState matchesBase = base.MatchLive(boat);
+        for (auto [x, y] : matchesBase.OnCells()) {
+            boatMaskInBase |= boat.Moved(x, y);
+        }
+    }
+    boatMask &= ~boatMaskInBase; // Only consider boats that are new in the output
+
+    if (!boatMask.IsEmpty()) {
+        auto gliders = gliderSet.ExtractGliders();
+        for (const auto& glider : gliders) {
+            GliderSet reduced = gliderSet.RemoveGlider(glider);
+            LifeState altOut = Component::RunComponentOutcome(base, reduced);
+            LifeState diffRemoved = out & ~altOut;
+            LifeState diffAdded = altOut & ~out;
+            if (diffAdded.IsEmpty() && !diffRemoved.IsEmpty() && (diffRemoved & ~boatMask).IsEmpty()) {
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
 Component Component::FromSJK(const std::string& compStr) {
