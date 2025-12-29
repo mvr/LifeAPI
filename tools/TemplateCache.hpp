@@ -128,6 +128,9 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
         } else {
             auto& [existingTempl, count] = it->second;
             count++;
+            if (templ.gliderSet.Cost() < existingTempl.gliderSet.Cost()) {
+                existingTempl = templ;
+            }
         }
     }
     
@@ -447,7 +450,13 @@ std::vector<ComponentTemplate> TemplateCache::ExtractTemplatesFromComponentsFile
             }
             
             ComponentTemplate templ = ComponentTemplate::FromComponent(comp);
-            uniqueTemplates[templ.GetHash()] = templ;
+            uint64_t hash = templ.GetHash();
+            auto it = uniqueTemplates.find(hash);
+            if (it == uniqueTemplates.end()) {
+                uniqueTemplates[hash] = templ;
+            } else if (templ.gliderSet.Cost() < it->second.gliderSet.Cost()) {
+                it->second = templ;
+            }
 
         } catch (const std::exception& e) {
             if (verbose) {
