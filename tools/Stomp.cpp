@@ -187,6 +187,7 @@ private:
     bool outputVisitedApgcodes;
     bool acceptFirst;
     bool verbose;
+    unsigned targetCost;
     
     // Shared counters
     std::atomic<int>& processCount;
@@ -574,6 +575,7 @@ void TransferSynthesis::RunSynthesis(
       .outputVisitedApgcodes = outputVisitedApgcodes,
       .acceptFirst = acceptFirst,
       .verbose = verbose,
+      .targetCost = targetCost,
       .processCount = processCount,
       .processedMutex = processedMutex,
       .miniDbMutex = miniDbMutex,
@@ -685,6 +687,9 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx) {
     // Check database for early termination (non-max-depth patterns)
     auto it = ctx.minPaths.find(currentApgcode);
     if (it != ctx.minPaths.end()) {
+      if (it->second.cost > ctx.targetCost) {
+        continue;
+      }
       // Add to mini database as a seed
       {
         std::lock_guard<std::mutex> lock(ctx.miniDbMutex);
@@ -805,6 +810,9 @@ void TransferSynthesis::ProcessSynthesis(
     }
     auto dbIt = ctx.minPaths.find(synthesis.precursorApgcode);
     if (dbIt != ctx.minPaths.end()) {
+      if (dbIt->second.cost > ctx.targetCost) {
+        return;
+      }
       {
         std::lock_guard<std::mutex> lock(ctx.processedMutex);
         if (ctx.processed.find(synthesis.precursorApgcode) != ctx.processed.end()) {
