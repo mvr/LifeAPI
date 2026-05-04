@@ -153,6 +153,7 @@ public:
       const std::unordered_set<std::string> &forbiddenApgcodes,
       int maxDepth = 1,
       int maxPrecursorPop = 30,
+      int optimalPopThreshold = 0,
       bool skipExisting = false,
       bool acceptFirst = false,
       int numThreads = 1,
@@ -188,6 +189,7 @@ private:
     bool acceptFirst;
     bool verbose;
     unsigned targetCost;
+    int optimalPopThreshold;
     
     // Shared counters
     std::atomic<int>& processCount;
@@ -454,6 +456,7 @@ void TransferSynthesis::RunSynthesis(
     const std::unordered_set<std::string> &forbiddenApgcodes,
     int maxDepth,
     int maxPrecursorPop,
+    int optimalPopThreshold,
     bool skipExisting,
     bool acceptFirst,
     int numThreads,
@@ -576,6 +579,7 @@ void TransferSynthesis::RunSynthesis(
       .acceptFirst = acceptFirst,
       .verbose = verbose,
       .targetCost = targetCost,
+      .optimalPopThreshold = optimalPopThreshold,
       .processCount = processCount,
       .processedMutex = processedMutex,
       .miniDbMutex = miniDbMutex,
@@ -664,6 +668,10 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx) {
     }
     
     auto [population, depth, currentApgcode] = entry;
+
+    if (ctx.optimalPopThreshold > 0 && population < ctx.optimalPopThreshold) {
+      continue;
+    }
 
     if (ctx.forbiddenApgcodes.contains(currentApgcode)) {
       continue;
@@ -791,13 +799,13 @@ void TransferSynthesis::ProcessSynthesis(
   }
   
   synthesis.component.ShiftToFitTorus();
-  
+  unsigned componentCost = synthesis.component.Cost();
   // Add synthesis to mini database
       {
         std::lock_guard<std::mutex> lock(ctx.miniDbMutex);
         ctx.miniDb.InsertIfBetter(
             synthesis.precursorApgcode,
-            synthesis.component.Cost(),
+            componentCost,
             synthesis.targetApgcode,
             synthesis.component.Realise().RLE());
       }
@@ -810,7 +818,7 @@ void TransferSynthesis::ProcessSynthesis(
     }
     auto dbIt = ctx.minPaths.find(synthesis.precursorApgcode);
     if (dbIt != ctx.minPaths.end()) {
-      if (dbIt->second.cost > ctx.targetCost) {
+      if (dbIt->second.cost + componentCost + depth - 1 >= ctx.targetCost) {
         return;
       }
       {
@@ -845,6 +853,9 @@ void TransferSynthesis::ProcessSynthesis(
   } else {
     // Get precursor population for priority queue
     int precursorPop = synthesis.component.base.GetPop();
+    if (ctx.optimalPopThreshold > 0 && precursorPop < ctx.optimalPopThreshold) {
+      return;
+    }
     ctx.searchQueue.push({precursorPop, depth + 1, synthesis.precursorApgcode});
   }
 }
@@ -870,6 +881,9 @@ void TransferSynthesis::AddDatabasePrecursors(
         
         LifeState precursorPattern = LifeState::DecodeApgcode(precursorApgcode);
         int precursorPop = precursorPattern.GetPop();
+        if (ctx.optimalPopThreshold > 0 && precursorPop < ctx.optimalPopThreshold) {
+          continue;
+        }
         ctx.searchQueue.push({precursorPop, depth + 1, precursorApgcode});
       } catch (const std::exception&) {
         continue;
@@ -1025,6 +1039,11 @@ int main(int argc, char* argv[]) {
     int maxPrecursorPop = 30;
     app.add_option("--max-precursor-pop", maxPrecursorPop, "Maximum population of precursor patterns")
         ->default_val(30);
+
+    int optimalPopThreshold = 0;
+    app.add_option("--optimal-pop-threshold", optimalPopThreshold,
+        "Assume syntheses for populations below this are optimal")
+        ->default_val(0);
     
     int numThreads = 1;
     app.add_option("--threads", numThreads, "Number of worker threads for parallel processing")
@@ -1253,6 +1272,7 @@ int main(int argc, char* argv[]) {
             forbiddenApgcodes,
             maxDepth,
             maxPrecursorPop,
+            optimalPopThreshold,
             skipExisting,
             acceptFirst,
             numThreads,
