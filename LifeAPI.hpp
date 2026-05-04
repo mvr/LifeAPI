@@ -984,7 +984,6 @@ public:
     LifeState col0(InitializedTag::UNINITIALIZED), col1(InitializedTag::UNINITIALIZED);
     CountRows(col0, col1);
 
-#pragma clang loop unroll(full)
     for (int i = 0; i < N; i++) {
       int idxU;
       int idxB;
@@ -1030,7 +1029,6 @@ public:
     LifeState col0(InitializedTag::UNINITIALIZED), col1(InitializedTag::UNINITIALIZED);
     CountRows(col0, col1);
 
-    #pragma clang loop unroll(full)
     for (int i = 0; i < N; i++) {
       int idxU;
       int idxB;
@@ -1072,7 +1070,6 @@ public:
     LifeState col0(InitializedTag::UNINITIALIZED), col1(InitializedTag::UNINITIALIZED);
     CountRows(col0, col1);
 
-    #pragma clang loop unroll(full)
     for (int i = 0; i < N; i++) {
       int idxU;
       int idxB;
@@ -1262,7 +1259,6 @@ void LifeState::Step() {
   LifeState col0(InitializedTag::UNINITIALIZED), col1(InitializedTag::UNINITIALIZED);
   CountRows(col0, col1);
 
-  #pragma clang loop unroll(full)
   for (unsigned i = 0; i < N; i++) {
     int idxU;
     int idxB;
@@ -1284,7 +1280,6 @@ void LifeState::StepAlt() {
   LifeState col0(InitializedTag::UNINITIALIZED), col1(InitializedTag::UNINITIALIZED);
   CountRows(col0, col1);
 
-  #pragma clang loop unroll(full)
   for (unsigned i = 0; i < N; i++) {
     int idxU;
     int idxB;
