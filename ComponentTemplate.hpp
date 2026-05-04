@@ -10,6 +10,8 @@ struct ComponentTemplate {
   LifeState base;
   LifeState knownOff;
   NeighbourCount count; // This should be more refined and use a full LifeStable
+  LifeState stable1; // Off cells that see 1 active neighbour (so shouldn't have 2 stable neighbours)
+  LifeState stable2;
   GliderSet gliderSet;
   LifeState out;
 
@@ -44,6 +46,8 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
   NeighbourCount startCount(component.base);
   LifeState everDifferentNeighbours;
   LifeState everMoreThanOne;
+  LifeState everOne;
+  LifeState everTwo;
 
   unsigned gen = 0;
 
@@ -55,6 +59,8 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
     everActive |= state ^ component.base;
     everDifferentNeighbours |= count.Difference(startCount);
     everMoreThanOne |= count.bit1 | count.bit2 | count.bit3;
+    everOne |= count.bit0 & ~count.bit1 & ~count.bit2 & ~count.bit3;
+    everTwo |= ~count.bit0 & count.bit1 & ~count.bit2 & ~count.bit3;
 
     state.Step();
     gen++;
@@ -76,9 +82,14 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
 
   LifeState knownOff = ~component.base & ~component.out & everActive.ZOI();
 
+  LifeState stable1 = everOne & ~component.base & ~everActive & everActive.ZOI();
+  LifeState stable2 = everTwo & ~component.base & ~everActive & everActive.ZOI();
+
   return {component.base & relevant,
           knownOff,
           count,
+          stable1,
+          stable2,
           component.gliderSet,
           component.out & relevant};
 }
@@ -132,6 +143,8 @@ ComponentTemplate ComponentTemplate::Transformed(SymmetryTransform t) const {
     base.Transformed(t),
     knownOff.Transformed(t),
     count.Transformed(t),
+    stable1.Transformed(t),
+    stable2.Transformed(t),
     gliderSet.Transformed(t),
     out.Transformed(t),
   };
@@ -142,6 +155,8 @@ ComponentTemplate ComponentTemplate::Moved(std::pair<int, int> p) const {
     base.Moved(p),
     knownOff.Moved(p),
     count.Moved(p),
+    stable1.Moved(p),
+    stable2.Moved(p),
     gliderSet.Moved(p),
     out.Moved(p),
   };
@@ -195,6 +210,8 @@ uint64_t ComponentTemplate::GetHashNonSymmetrised() const {
   hash = combine_hashes(hash, count.bit0.GetHash());
   hash = combine_hashes(hash, count.bit1.GetHash());
   hash = combine_hashes(hash, count.bit2.GetHash());
+  hash = combine_hashes(hash, stable1.GetHash());
+  hash = combine_hashes(hash, stable2.GetHash());
   return hash;
 }
 
