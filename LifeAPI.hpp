@@ -300,27 +300,23 @@ struct __attribute__((aligned(64))) LifeState {
 
   // Get an ON cell as fast as possible. I make no guarantees about which cell it will be
   std::pair<int, int> FirstOn() const {
-    unsigned foundq = 0;
-    for (unsigned x = 0; x < N; x += 4) {
-      if ((state[x] | state[x + 1] | state[x + 2] | state[x + 3]) != 0ULL) {
-        foundq = x;
+    for (int x = N - 4; x >= 0; x -= 4) {
+      if ((state[x] | state[x + 1] | state[x + 2] | state[x + 3]) == 0ULL) {
+        continue;
+      }
+
+      if (state[x] != 0ULL) {
+        return std::make_pair(x, std::countr_zero(state[x]));
+      } else if (state[x + 1] != 0ULL) {
+        return std::make_pair(x + 1, std::countr_zero(state[x + 1]));
+      } else if (state[x + 2] != 0ULL) {
+        return std::make_pair(x + 2, std::countr_zero(state[x + 2]));
+      } else {
+        return std::make_pair(x + 3, std::countr_zero(state[x + 3]));
       }
     }
-    // if (foundq == N) {
-    //   return std::make_pair(-1, -1);
-    // }
 
-    if (state[foundq] != 0ULL) {
-      return std::make_pair(foundq, std::countr_zero(state[foundq]));
-    } else if (state[foundq + 1] != 0ULL) {
-      return std::make_pair(foundq + 1, std::countr_zero(state[foundq + 1]));
-    } else if (state[foundq + 2] != 0ULL) {
-      return std::make_pair(foundq + 2, std::countr_zero(state[foundq + 2]));
-    } else if (state[foundq + 3] != 0ULL) {
-      return std::make_pair(foundq + 3, std::countr_zero(state[foundq + 3]));
-    } else {
-      return std::make_pair(-1, -1);
-    }
+    return std::make_pair(-1, -1);
   }
 
   // std::pair<int, int> FirstOnWrapped() const {
@@ -749,37 +745,84 @@ public:
   ////////////////////////////////
 
   void Move(int x, int y) {
-    uint64_t temp[2 * N] = {0};
-
+    uint64_t temp[N];
     x = torus_wrap(x);
+    const int shift = static_cast<int>(static_cast<unsigned>(y) & 63u);
+    const unsigned split = N - x;
 
-    for (unsigned i = 0; i < N; i++) {
-      temp[i] = std::rotl(state[i], y);
-      temp[i + N] = std::rotl(state[i], y);
+    if (x == 0 && shift == 0)
+      return;
+
+    if (x == 0) {
+      for (unsigned i = 0; i < N; i++) {
+        state[i] = std::rotl(state[i], shift);
+      }
+      return;
     }
 
-    const int shift = N - x;
+    if (shift == 0) {
+      for (unsigned i = 0; i < split; i++) {
+        temp[i + x] = state[i];
+      }
+
+      for (unsigned i = split; i < N; i++) {
+        temp[i - split] = state[i];
+      }
+
+      for (unsigned i = 0; i < N; i++) {
+        state[i] = temp[i];
+      }
+      return;
+    }
+
+    for (unsigned i = 0; i < split; i++) {
+      temp[i + x] = std::rotl(state[i], shift);
+    }
+
+    for (unsigned i = split; i < N; i++) {
+      temp[i - split] = std::rotl(state[i], shift);
+    }
+
     for (unsigned i = 0; i < N; i++) {
-      state[i] = temp[i + shift];
+      state[i] = temp[i];
     }
   }
   void Move(std::pair<int, int> vec) { Move(vec.first, vec.second); }
 
   constexpr LifeState Moved(int x, int y) const {
-    uint64_t temp[2 * N];
-
     x = torus_wrap(x);
+    const int shift = static_cast<int>(static_cast<unsigned>(y) & 63u);
+    const unsigned split = N - x;
 
-    for (unsigned i = 0; i < N; i++) {
-      temp[i] = std::rotl(state[i], y);
-      temp[i + N] = std::rotl(state[i], y);
-    }
+    if (x == 0 && shift == 0)
+      return *this;
 
     LifeState result(InitializedTag::UNINITIALIZED);
 
-    const unsigned shift = N - x;
-    for (unsigned i = 0; i < N; i++) {
-      result[i] = temp[i + shift];
+    if (x == 0) {
+      for (unsigned i = 0; i < N; i++) {
+        result[i] = std::rotl(state[i], shift);
+      }
+      return result;
+    }
+
+    if (shift == 0) {
+      for (unsigned i = 0; i < split; i++) {
+        result[i + x] = state[i];
+      }
+
+      for (unsigned i = split; i < N; i++) {
+        result[i - split] = state[i];
+      }
+      return result;
+    }
+
+    for (unsigned i = 0; i < split; i++) {
+      result[i + x] = std::rotl(state[i], shift);
+    }
+
+    for (unsigned i = split; i < N; i++) {
+      result[i - split] = std::rotl(state[i], shift);
     }
 
     return result;
@@ -1254,23 +1297,29 @@ public:
 };
 
 void LifeState::Step() {
-  LifeState col0(InitializedTag::UNINITIALIZED), col1(InitializedTag::UNINITIALIZED);
-  CountRows(col0, col1);
+  uint64_t sum0[N];
+  uint64_t sum1[N];
+  uint64_t s0[N];
+  uint64_t s1[N];
 
   for (unsigned i = 0; i < N; i++) {
-    int idxU;
-    int idxB;
-    if (i == 0)
-      idxU = N - 1;
-    else
-      idxU = i - 1;
+    const uint64_t center = state[i];
+    const uint64_t left = std::rotl(center, 1);
+    const uint64_t right = std::rotr(center, 1);
+    s0[i] = left ^ right;
+    s1[i] = left & right;
+    sum0[i] = s0[i] ^ center;
+    sum1[i] = s1[i] | (s0[i] & center);
+  }
 
-    if (i == N - 1)
-      idxB = 0;
-    else
-      idxB = i + 1;
-
-    state[i] = Rokicki(state[i], col0[idxU], col1[idxU], col0[idxB], col1[idxB]);
+  for (unsigned i = 0; i < N; i++) {
+    const int idxU = (i == 0) ? N - 1 : i - 1;
+    const int idxB = (i == N - 1) ? 0 : i + 1;
+    const uint64_t ts0 = sum0[idxB] ^ sum0[idxU];
+    const uint64_t ts1 = (sum0[idxB] & sum0[idxU]) | (ts0 & s0[i]);
+    state[i] = (sum1[idxB] ^ sum1[idxU] ^ ts1 ^ s1[i]) &
+               ((sum1[idxB] | sum1[idxU]) ^ (ts1 | s1[i])) &
+               ((ts0 ^ s0[i]) | state[i]);
   }
 }
 
