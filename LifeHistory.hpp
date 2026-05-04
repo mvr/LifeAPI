@@ -53,6 +53,19 @@ struct LifeHistory {
 
   void Move(std::pair<int, int> vec) { Move(vec.first, vec.second); }
 
+  void Transform(SymmetryTransform transf) {
+    state.Transform(transf);
+    history.Transform(transf);
+    marked.Transform(transf);
+    original.Transform(transf);
+  }
+
+  LifeHistory Transformed(SymmetryTransform transf) const {
+    LifeHistory result = *this;
+    result.Transform(transf);
+    return result;
+  }
+
   void AlignWith(const LifeState &other) {
     auto offset = state.Match(other).FirstOn();
     Move(-offset.first, -offset.second);
