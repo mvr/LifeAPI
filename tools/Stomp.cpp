@@ -782,15 +782,9 @@ void TransferSynthesis::ProcessSynthesis(
   
   synthesis.component.ShiftToFitTorus();
   unsigned componentCost = synthesis.component.Cost();
-  std::string componentRLE = synthesis.component.Realise().RLE();
-  // Add synthesis to mini database
-      {
-        miniDb.InsertIfBetter(
-            synthesis.precursorApgcode,
-            componentCost,
-            synthesis.targetApgcode,
-            componentRLE);
-      }
+  miniDb.InsertIfBetterLazy(
+      synthesis.precursorApgcode, componentCost, synthesis.targetApgcode,
+      [&] { return synthesis.component.Realise().RLE(); });
 
   // If we're at max depth, do database lookup immediately
   if (depth + 1 >= ctx.maxDepth) {
