@@ -785,6 +785,7 @@ void TransferSynthesis::ProcessSynthesis(
   
   synthesis.component.ShiftToFitTorus();
   unsigned componentCost = synthesis.component.Cost();
+  std::string componentRLE = synthesis.component.Realise().RLE();
   // Add synthesis to mini database
       {
         std::lock_guard<std::mutex> lock(ctx.miniDbMutex);
@@ -792,7 +793,7 @@ void TransferSynthesis::ProcessSynthesis(
             synthesis.precursorApgcode,
             componentCost,
             synthesis.targetApgcode,
-            synthesis.component.Realise().RLE());
+            componentRLE);
       }
 
   // If we're at max depth, do database lookup immediately
