@@ -53,3 +53,40 @@ TEST(InteractionTest, RandomInteractionCountsTest) {
     TestInteractionCounts(random);
   }
 }
+
+TEST(InteractionTest, FirstOnReturnsLiveCellOrEmptySentinel) {
+  std::vector<LifeState> states = {
+      LifeState(),
+      LifeState::Cell({0, 0}),
+      LifeState::Cell({63, 63}),
+      LifeState::Cell({31, 31}),
+      LifeState::SolidRect(0, 0, 1, 64),
+      LifeState::SolidRect(60, 0, 4, 64),
+      LifeState::SolidRect(8, 8, 16, 16),
+      LifeState::Checkerboard(),
+      ~LifeState(),
+  };
+
+  for (int x = 0; x < N; x++) {
+    for (int y = 0; y < N; y++) {
+      states.push_back(LifeState::Cell({x, y}));
+    }
+  }
+
+  for (unsigned i = 0; i < 100; i++) {
+    states.push_back(LifeState::RandomState());
+  }
+
+  for (const auto &state : states) {
+    const auto cell = state.FirstOn();
+    if (state.IsEmpty()) {
+      EXPECT_EQ(cell, std::make_pair(-1, -1));
+    } else {
+      ASSERT_GE(cell.first, 0);
+      ASSERT_LT(cell.first, N);
+      ASSERT_GE(cell.second, 0);
+      ASSERT_LT(cell.second, N);
+      EXPECT_TRUE(state.Get(cell));
+    }
+  }
+}
