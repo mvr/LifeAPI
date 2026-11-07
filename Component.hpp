@@ -318,8 +318,21 @@ bool Component::SanityCheck() const {
   if (base.Stepped() != base)
     return false;
 
-  if (Realise().Stepped(200) != out)
-    return false;
+  LifeState initial = Realise();
+  LifeState state = initial;
+  LifeState checkpoint = state;
+  unsigned power = 1, distance = 0;
+  for (unsigned gen = 0; gen < 200 && state != out; gen += 8) {
+    state.Step(8);
+    if (state == out) break;
+    if (state == checkpoint) return false;
+    if (++distance == power) {
+      checkpoint = state;
+      power *= 2;
+      distance = 0;
+    }
+  }
+  if (state != out) return false;
 
   // Rewind in steps of 16 until all salvos are outside the base pattern bounding box
   auto [minX, minY, maxX, maxY] = base.XYBounds();
@@ -356,7 +369,7 @@ bool Component::SanityCheck() const {
   rewoundComp.gliderSet = rewoundGliders;
   rewoundComp.out = out;
 
-  if (rewoundComp.Realise().Stepped(totalRewind) != Realise()) {
+  if (rewoundComp.Realise().Stepped(totalRewind) != initial) {
     return false;
   }
 
