@@ -1,6 +1,8 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <span>
 
 #include "LifeAPI.hpp"
 
@@ -172,61 +174,91 @@ inline void LifeState::Transform(SymmetryTransform transf) {
   }
 }
 
-inline std::vector<SymmetryTransform> SymmetryGroupFromEnum(const StaticSymmetry sym) {
+inline std::span<const SymmetryTransform>
+SymmetryGroupFromEnum(const StaticSymmetry sym) {
   using enum SymmetryTransform;
+  static constexpr std::array c1{Identity};
+  static constexpr std::array d2AcrossX{Identity, ReflectAcrossX};
+  static constexpr std::array d2AcrossXEven{Identity, ReflectAcrossXEven};
+  static constexpr std::array d2AcrossY{Identity, ReflectAcrossY};
+  static constexpr std::array d2AcrossYEven{Identity, ReflectAcrossYEven};
+  static constexpr std::array d2DiagOdd{Identity, ReflectAcrossYeqX};
+  static constexpr std::array d2NegDiagOdd{Identity, ReflectAcrossYeqNegXP1};
+  static constexpr std::array c2{Identity, Rotate180OddBoth};
+  static constexpr std::array c2Even{Identity, Rotate180EvenBoth};
+  static constexpr std::array c2HorizontalEven{
+      Identity, Rotate180EvenHorizontal};
+  static constexpr std::array c2VerticalEven{Identity, Rotate180EvenVertical};
+  static constexpr std::array c4{Identity, Rotate90, Rotate180OddBoth,
+                                 Rotate270};
+  static constexpr std::array c4Even{Identity, Rotate90Even,
+                                     Rotate180EvenBoth, Rotate270Even};
+  static constexpr std::array d4{Identity, ReflectAcrossX, Rotate180OddBoth,
+                                 ReflectAcrossY};
+  static constexpr std::array d4Even{Identity, ReflectAcrossXEven,
+                                     Rotate180EvenBoth, ReflectAcrossYEven};
+  static constexpr std::array d4HorizontalEven{
+      Identity, ReflectAcrossYEven, Rotate180EvenHorizontal, ReflectAcrossX};
+  static constexpr std::array d4VerticalEven{
+      Identity, ReflectAcrossXEven, Rotate180EvenVertical, ReflectAcrossY};
+  static constexpr std::array d4Diag{Identity, ReflectAcrossYeqX,
+                                     Rotate180OddBoth,
+                                     ReflectAcrossYeqNegXP1};
+  static constexpr std::array d4DiagEven{Identity, ReflectAcrossYeqX,
+                                         Rotate180EvenBoth,
+                                         ReflectAcrossYeqNegX};
+  static constexpr std::array d8{Identity,       ReflectAcrossX,
+                                 ReflectAcrossYeqX, ReflectAcrossY,
+                                 ReflectAcrossYeqNegXP1, Rotate90,
+                                 Rotate270,      Rotate180OddBoth};
+  static constexpr std::array d8Even{Identity,           ReflectAcrossXEven,
+                                     ReflectAcrossYeqX,  ReflectAcrossYEven,
+                                     ReflectAcrossYeqNegX, Rotate90Even,
+                                     Rotate270Even,      Rotate180EvenBoth};
   switch (sym) {
   case StaticSymmetry::C1:
-    return {Identity};
+    return c1;
   case StaticSymmetry::D2AcrossX:
-    return {Identity, ReflectAcrossX};
+    return d2AcrossX;
     // vertical/horizontal here refer to box dimensions, NOT axis of reflection
   case StaticSymmetry::D2AcrossXEven:
-    return {Identity, ReflectAcrossXEven};
+    return d2AcrossXEven;
   case StaticSymmetry::D2AcrossY:
-    return {Identity, ReflectAcrossY};
+    return d2AcrossY;
   case StaticSymmetry::D2AcrossYEven:
-    return {Identity, ReflectAcrossYEven};
+    return d2AcrossYEven;
   case StaticSymmetry::D2diagodd:
-    return {Identity, ReflectAcrossYeqX};
+    return d2DiagOdd;
   case StaticSymmetry::D2negdiagodd:
-    return {Identity, ReflectAcrossYeqNegXP1};
+    return d2NegDiagOdd;
   case StaticSymmetry::C2:
-    return {Identity, Rotate180OddBoth};
+    return c2;
   case StaticSymmetry::C2even:
-    return {Identity, Rotate180EvenBoth};
+    return c2Even;
   case StaticSymmetry::C2horizontaleven:
-    return {Identity, Rotate180EvenHorizontal};
+    return c2HorizontalEven;
   case StaticSymmetry::C2verticaleven:
-    return {Identity, Rotate180EvenVertical};
+    return c2VerticalEven;
   case StaticSymmetry::C4:
-    return {Identity, Rotate90, Rotate180OddBoth, Rotate270};
+    return c4;
   case StaticSymmetry::C4even:
-    return {Identity, Rotate90Even, Rotate180EvenBoth, Rotate270Even};
+    return c4Even;
   case StaticSymmetry::D4:
-    return {Identity, ReflectAcrossX, Rotate180OddBoth, ReflectAcrossY};
+    return d4;
   case StaticSymmetry::D4even:
-    return {Identity, ReflectAcrossXEven, Rotate180EvenBoth,
-            ReflectAcrossYEven};
+    return d4Even;
   case StaticSymmetry::D4horizontaleven:
-    return {Identity, ReflectAcrossYEven, Rotate180EvenHorizontal,
-            ReflectAcrossX};
+    return d4HorizontalEven;
   case StaticSymmetry::D4verticaleven:
-    return {Identity, ReflectAcrossXEven, Rotate180EvenVertical,
-            ReflectAcrossY};
+    return d4VerticalEven;
   case StaticSymmetry::D4diag:
-    return {Identity, ReflectAcrossYeqX, Rotate180OddBoth,
-            ReflectAcrossYeqNegXP1};
+    return d4Diag;
   case StaticSymmetry::D4diageven:
-    return {Identity, ReflectAcrossYeqX, Rotate180EvenBoth,
-            ReflectAcrossYeqNegX};
+    return d4DiagEven;
   case StaticSymmetry::D8:
-    return {Identity,       ReflectAcrossX,         ReflectAcrossYeqX,
-            ReflectAcrossY, ReflectAcrossYeqNegXP1, Rotate90,
-            Rotate270,      Rotate180OddBoth};
+    return d8;
   case StaticSymmetry::D8even:
-    return {Identity,           ReflectAcrossXEven,   ReflectAcrossYeqX,
-            ReflectAcrossYEven, ReflectAcrossYeqNegX, Rotate90Even,
-            Rotate270Even,      Rotate180EvenBoth};
+    return d8Even;
   }
 }
 
@@ -512,7 +544,10 @@ inline std::string SymmetryToString(StaticSymmetry sym) {
   }
 }
 
-inline std::vector<SymmetryTransform> CharToTransforms(char ch) {
+inline std::span<const SymmetryTransform> CharToTransforms(char ch) {
+  using enum SymmetryTransform;
+  static constexpr std::array xTransforms{Identity, Rotate90, ReflectAcrossX,
+                                          ReflectAcrossYeqX};
   switch (ch) {
   case '.':
     return SymmetryGroupFromEnum(StaticSymmetry::C1);
@@ -528,8 +563,7 @@ inline std::vector<SymmetryTransform> CharToTransforms(char ch) {
   case '@':
     return SymmetryGroupFromEnum(StaticSymmetry::C4);
   case 'x':
-    using enum SymmetryTransform;
-    return {Identity, Rotate90, ReflectAcrossX, ReflectAcrossYeqX};
+    return xTransforms;
   case '*':
     return SymmetryGroupFromEnum(StaticSymmetry::D8);
   default:
