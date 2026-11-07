@@ -622,7 +622,7 @@ bool Component::IsUseful() const{
     if (gliderSet.Cost() == 1) return true;
 
     // Boat-bit filter: if a glider only creates a boat, drop the component
-    static const LifeState boatOrients[4] = {
+    static constexpr LifeState boatOrients[4] = {
         LifeState::ConstantParse("b2o$obo$bo!"),
         LifeState::ConstantParse("bo$obo$b2o!"),
         LifeState::ConstantParse("bo$obo$2o!"),
@@ -650,8 +650,12 @@ bool Component::IsUseful() const{
             LifeState altOut = Component::RunComponentOutcome(base, reduced);
             LifeState diffRemoved = out & ~altOut;
             LifeState diffAdded = altOut & ~out;
-            if (diffAdded.IsEmpty() && !diffRemoved.IsEmpty() && (diffRemoved & ~boatMask).IsEmpty()) {
-                return false;
+            if (diffAdded.IsEmpty() && diffRemoved.GetPop() == 5 &&
+                (diffRemoved & ~boatMask).IsEmpty() && out.Stepped() == out) {
+                GliderSet one{gliderSet.se & glider, gliderSet.sw & glider,
+                              gliderSet.nw & glider, gliderSet.ne & glider};
+                if (altOut.Stepped() == altOut && RunComponentOutcome(altOut, one) == out)
+                    return false;
             }
         }
     }
