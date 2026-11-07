@@ -141,6 +141,7 @@ public:
   // Find all possible synthesis steps for a given pattern
   static std::vector<SynthesisResult> FindSynthesisSteps(
       const LifeState &targetPattern,
+      const std::string& targetApgcode,
       const std::vector<ComponentTemplate> &templates,
       const TemplateTree& templateTree,
       int maxPrecursorPop,
@@ -220,13 +221,13 @@ private:
 
 std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesisSteps(
     const LifeState& targetPattern,
+    const std::string& targetApgcode,
     const std::vector<ComponentTemplate>& templates,
     const TemplateTree& templateTree,
     int maxPrecursorPop,
     bool verbose) {
 
   std::vector<SynthesisResult> results;
-  std::string targetApgcode = targetPattern.EncodeApgcode();
 
   std::vector<TemplateAnchor> anchors;
   TraversalDebug dbg;
@@ -739,7 +740,7 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx, ComponentDatabase
       int maxPop = depth == ctx.maxDepth - 1 ? std::numeric_limits<int>::max() : ctx.maxPrecursorPop;
       
       for (const LifeState& pattern : orientations) {
-        auto syntheses = FindSynthesisSteps(pattern, ctx.templates, ctx.templateTree, maxPop, ctx.verbose);
+        auto syntheses = FindSynthesisSteps(pattern, currentApgcode, ctx.templates, ctx.templateTree, maxPop, ctx.verbose);
         
         for (auto& synthesis : syntheses) {
           ProcessSynthesis(synthesis, ctx, miniDb, depth);
