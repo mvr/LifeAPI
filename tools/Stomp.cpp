@@ -172,7 +172,6 @@ private:
   
   // Context object to reduce parameter passing
   struct SearchContext {
-    ComponentDatabase& miniDb;
     ThreadSafeQueue<QueueEntry>& searchQueue;
     std::unordered_set<std::string>& processed;
     std::unordered_set<std::string>& allVisitedApgcodes;
@@ -196,25 +195,26 @@ private:
     
     // Synchronization
     std::mutex& processedMutex;
-    std::mutex& miniDbMutex;
     std::mutex& visitedApgcodesMutex;
     std::mutex& cerrMutex;
     std::atomic<bool>& shouldStop;
   };
   
   // Worker thread function for processing search queue entries
-  static void ProcessSearchQueue(SearchContext& ctx);
+  static void ProcessSearchQueue(SearchContext& ctx, ComponentDatabase& miniDb);
 
   // Process a single synthesis result
   static void ProcessSynthesis(
       SynthesisResult& synthesis,
       SearchContext& ctx,
+      ComponentDatabase& miniDb,
       int depth);
 
   // Add database precursors to search queue
   static void AddDatabasePrecursors(
       const std::string& currentApgcode,
       SearchContext& ctx,
+      ComponentDatabase& miniDb,
       int depth);
 };
 
@@ -501,8 +501,6 @@ void TransferSynthesis::RunSynthesis(
               << " templates=" << templates.size() << std::endl;
   }
 
-  // Build mini synthesis database using ComponentDatabase
-  ComponentDatabase miniDb;
   // std::unordered_set<std::string> processed;
 
   int successCount = 0;
@@ -529,8 +527,8 @@ void TransferSynthesis::RunSynthesis(
     }
     std::cerr << std::endl;
     
-    // Build mini database for multi-step synthesis
-    miniDb.db.clear();
+    // Each worker owns its synthesis edges until the search completes.
+    std::vector<ComponentDatabase> workerDbs(numThreads);
     std::unordered_set<std::string> processed;
     
     // Thread-safe queue for multithreaded processing
@@ -538,7 +536,6 @@ void TransferSynthesis::RunSynthesis(
     
     // Mutexes for shared data structures
     std::mutex processedMutex;
-    std::mutex miniDbMutex;
     std::mutex cerrMutex;
     std::atomic<bool> shouldStop{false};
     
@@ -565,7 +562,6 @@ void TransferSynthesis::RunSynthesis(
     std::atomic<int> processCount{0};
     
     SearchContext ctx = {
-      .miniDb = miniDb,
       .searchQueue = searchQueue,
       .processed = processed,
       .allVisitedApgcodes = allVisitedApgcodes,
@@ -583,7 +579,6 @@ void TransferSynthesis::RunSynthesis(
       .optimalPopThreshold = optimalPopThreshold,
       .processCount = processCount,
       .processedMutex = processedMutex,
-      .miniDbMutex = miniDbMutex,
       .visitedApgcodesMutex = visitedApgcodesMutex,
       .cerrMutex = cerrMutex,
       .shouldStop = shouldStop
@@ -592,7 +587,7 @@ void TransferSynthesis::RunSynthesis(
     // Create worker threads
     std::vector<std::thread> workers;
     for (int i = 0; i < numThreads; ++i) {
-      workers.emplace_back(ProcessSearchQueue, std::ref(ctx));
+      workers.emplace_back(ProcessSearchQueue, std::ref(ctx), std::ref(workerDbs[i]));
     }
     
     // Wait for all workers to complete
@@ -600,6 +595,8 @@ void TransferSynthesis::RunSynthesis(
       worker.join();
     }
 
+    ComponentDatabase miniDb;
+    for (auto& workerDb : workerDbs) miniDb.MergeFrom(std::move(workerDb));
     auto results = miniDb.Dijkstra();
     unsigned foundCost = std::numeric_limits<unsigned>::max();
 
@@ -658,7 +655,7 @@ void TransferSynthesis::RunSynthesis(
   std::cerr << std::endl;
 }
 
-void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx) {
+void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx, ComponentDatabase& miniDb) {
   ctx.searchQueue.register_thread();
   
   QueueEntry entry;
@@ -701,8 +698,7 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx) {
       }
       // Add to mini database as a seed
       {
-        std::lock_guard<std::mutex> lock(ctx.miniDbMutex);
-        ctx.miniDb.InsertIfBetter("", it->second.cost, currentApgcode, ">>" + currentApgcode);
+        miniDb.InsertIfBetter("", it->second.cost, currentApgcode, ">>" + currentApgcode);
 
       }
       // if (it->second.cost + depth <= targetCost)
@@ -746,7 +742,7 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx) {
         auto syntheses = FindSynthesisSteps(pattern, ctx.templates, ctx.templateTree, maxPop, ctx.verbose);
         
         for (auto& synthesis : syntheses) {
-          ProcessSynthesis(synthesis, ctx, depth);
+          ProcessSynthesis(synthesis, ctx, miniDb, depth);
 
           if (ctx.shouldStop.load()) {
             break;
@@ -755,7 +751,7 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx) {
       }
 
       // if (depth <= 1)
-      //   AddDatabasePrecursors(currentApgcode, ctx, depth);
+      //   AddDatabasePrecursors(currentApgcode, ctx, miniDb, depth);
 
     } catch (const std::exception&) {
       continue;
@@ -772,6 +768,7 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx) {
 void TransferSynthesis::ProcessSynthesis(
     SynthesisResult& synthesis,
     SearchContext& ctx,
+    ComponentDatabase& miniDb,
     int depth) {
 
   if (ctx.forbiddenApgcodes.contains(synthesis.precursorApgcode)) {
@@ -788,8 +785,7 @@ void TransferSynthesis::ProcessSynthesis(
   std::string componentRLE = synthesis.component.Realise().RLE();
   // Add synthesis to mini database
       {
-        std::lock_guard<std::mutex> lock(ctx.miniDbMutex);
-        ctx.miniDb.InsertIfBetter(
+        miniDb.InsertIfBetter(
             synthesis.precursorApgcode,
             componentCost,
             synthesis.targetApgcode,
@@ -816,8 +812,7 @@ void TransferSynthesis::ProcessSynthesis(
       }
         
       {
-        std::lock_guard<std::mutex> lock(ctx.miniDbMutex);
-        ctx.miniDb.InsertIfBetter("", dbIt->second.cost, synthesis.precursorApgcode, "");
+        miniDb.InsertIfBetter("", dbIt->second.cost, synthesis.precursorApgcode, "");
       }
         
       {
@@ -849,6 +844,7 @@ void TransferSynthesis::ProcessSynthesis(
 void TransferSynthesis::AddDatabasePrecursors(
     const std::string& currentApgcode,
     SearchContext& ctx,
+    ComponentDatabase& miniDb,
     int depth) {
   
   auto reverseIt = ctx.reverseLookup.find(currentApgcode);
@@ -861,8 +857,7 @@ void TransferSynthesis::AddDatabasePrecursors(
         auto [inData, gliderData, outData] = Component::SplitSJKLine(compLine);
 
         {
-          std::lock_guard<std::mutex> lock(ctx.miniDbMutex);
-          ctx.miniDb.InsertIfBetter(precursorApgcode, cost, currentApgcode, "");
+          miniDb.InsertIfBetter(precursorApgcode, cost, currentApgcode, "");
         }
         
         LifeState precursorPattern = LifeState::DecodeApgcode(precursorApgcode);

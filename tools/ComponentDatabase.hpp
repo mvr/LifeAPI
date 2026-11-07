@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <iostream>
 #include <limits>
+#include <utility>
 
 #include "../Component.hpp"
 #include "../ComponentTemplate.hpp"
@@ -34,6 +35,35 @@ public:
   std::unordered_map<std::string, SearchResult> Dijkstra(const std::string& seed = "") const;
 
   bool InsertIfBetter(const std::string& precursorApgcode, unsigned cost, const std::string& targetApgcode, const std::string& compLine);
+
+  // Search workers own their databases, so payload generation needs no lock.
+  template<typename MakeLine>
+  bool InsertIfBetterLazy(const std::string& precursorApgcode, unsigned cost,
+                         const std::string& targetApgcode, MakeLine&& makeLine) {
+    auto& edges = db[precursorApgcode];
+    auto existing = edges.end();
+    for (auto edge = edges.begin(); edge != edges.end(); ++edge) {
+      if (std::get<1>(*edge) != targetApgcode) continue;
+      if (std::get<0>(*edge) <= cost) return false;
+      existing = edge;
+    }
+    if (existing != edges.end()) {
+      auto line = makeLine();
+      *existing = {cost, targetApgcode, std::move(line)};
+      return true;
+    }
+    edges.emplace_back(cost, targetApgcode, makeLine());
+    return true;
+  }
+
+  void MergeFrom(ComponentDatabase&& other) {
+    // Transfer disjoint precursor lists without copying keys or payloads.
+    db.merge(other.db);
+    for (auto& [precursor, edges] : other.db)
+      for (auto& [cost, target, line] : edges)
+        InsertIfBetterLazy(precursor, cost, target, [&] { return std::move(line); });
+    other.db.clear();
+  }
 };
 
 void ComponentDatabase::LoadFromFiles(const std::vector<std::string>& filePaths, bool verbose) {
