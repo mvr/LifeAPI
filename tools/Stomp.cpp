@@ -136,7 +136,7 @@ public:
   // Check if a synthesis result is promising (filters out hopeless cases like distant blocks/tubs)
   static bool IsSparse(const LifeState &state);
   static bool IsSparse(const LifeState &state, const std::vector<LifeState> &components);
-  static bool IsPromising(const SynthesisResult& synthesis);
+  static bool IsPromising(const Component& comp);
 
   // Find all possible synthesis steps for a given pattern
   static std::vector<SynthesisResult> FindSynthesisSteps(
@@ -145,6 +145,7 @@ public:
       const std::vector<ComponentTemplate> &templates,
       const TemplateTree& templateTree,
       int maxPrecursorPop,
+      bool filterPromising,
       bool verbose = false);
 
   static void RunSynthesis(
@@ -225,6 +226,7 @@ std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesis
     const std::vector<ComponentTemplate>& templates,
     const TemplateTree& templateTree,
     int maxPrecursorPop,
+    bool filterPromising,
     bool verbose) {
 
   std::vector<SynthesisResult> results;
@@ -260,6 +262,7 @@ std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesis
       resultComp.ShiftToFitTorus();
 
       if (!resultComp.SanityCheck()) continue;
+      if (filterPromising && !IsPromising(resultComp)) continue;
 
       auto code = precursorCodes.find(resultComp.base);
       if (code == precursorCodes.end()) {
@@ -386,28 +389,18 @@ bool TransferSynthesis::IsSparse(const LifeState &state, const std::vector<LifeS
   return false;
 }
 
-bool TransferSynthesis::IsPromising(const SynthesisResult& synthesis) {
-
-  // // Filter out patterns with very small components (blocks, etc.)
-  // for (const auto& component : components) {
-  //   if (component.GetPop() <= 4) {
-  //     std::cerr << "Unpromising small component " << synthesis.precursorApgcode << std::endl;
-  //     return false;
-  //   }
-  // }
+bool TransferSynthesis::IsPromising(const Component& comp) {
 
   // Pure additions are always fine:
-  if ((synthesis.component.base & ~synthesis.component.out).IsEmpty()) {
+  if ((comp.base & ~comp.out).IsEmpty()) {
     return true;
   }
 
-  auto base_components = synthesis.component.base.StillComponents();
-  auto out_components = synthesis.component.out.StillComponents();
+  auto base_components = comp.base.StillComponents();
+  auto out_components = comp.out.StillComponents();
 
-  if (IsSparse(synthesis.component.base, base_components) &&
-      IsSparse(synthesis.component.out, out_components)) {
-    // std::cerr << "Unpromising density " << synthesis.precursorApgcode << std::endl;
-
+  if (IsSparse(comp.base, base_components) &&
+      IsSparse(comp.out, out_components)) {
     return false;
   }
 
@@ -424,17 +417,17 @@ bool TransferSynthesis::IsPromising(const SynthesisResult& synthesis) {
 
   // Steps that interact with the largest component without touching
   // any smaller ones are not promising
-  if (base_components.size() > 1 && !((synthesis.component.base ^ synthesis.component.out) & synthesis.component.base.ZOI()).IsEmpty()) {
-    LifeState smaller_components = synthesis.component.base & ~base_largest;
-    if ((smaller_components & ~synthesis.component.out).IsEmpty())
+  if (base_components.size() > 1 && !((comp.base ^ comp.out) & comp.base.ZOI()).IsEmpty()) {
+    LifeState smaller_components = comp.base & ~base_largest;
+    if ((smaller_components & ~comp.out).IsEmpty())
       return false;
   }
 
   // Steps that just shove a small still life around are not promising
-  LifeState nearbyDiff = (synthesis.component.base ^ synthesis.component.out) & base_largest.ZOI();
+  LifeState nearbyDiff = (comp.base ^ comp.out) & base_largest.ZOI();
   if(nearbyDiff.IsEmpty()) {
-    LifeState before = synthesis.component.base & ~base_largest.ZOI();
-    LifeState after = synthesis.component.out & ~base_largest.ZOI();
+    LifeState before = comp.base & ~base_largest.ZOI();
+    LifeState after = comp.out & ~base_largest.ZOI();
 
     // bool beforeSmall = !before.IsEmpty() && before.GetPop() <= 8 && before.Stepped() == before;
     // bool afterSmall = !after.IsEmpty() && after.GetPop() <= 8 && after.Stepped() == after;
@@ -448,6 +441,7 @@ bool TransferSynthesis::IsPromising(const SynthesisResult& synthesis) {
 
   return true;
 }
+
 
 inline bool PassesCostFilter(const std::string& inData, const std::string& outData,
                              const std::unordered_map<std::string, SearchResult>* costDb,
@@ -751,7 +745,7 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx, ComponentDatabase
       int maxPop = depth == ctx.maxDepth - 1 ? std::numeric_limits<int>::max() : ctx.maxPrecursorPop;
       
       for (const LifeState& pattern : orientations) {
-        auto syntheses = FindSynthesisSteps(pattern, currentApgcode, ctx.templates, ctx.templateTree, maxPop, ctx.verbose);
+        auto syntheses = FindSynthesisSteps(pattern, currentApgcode, ctx.templates, ctx.templateTree, maxPop, depth + 1 < ctx.maxDepth, ctx.verbose);
         
         for (auto& synthesis : syntheses) {
           ProcessSynthesis(synthesis, ctx, miniDb, depth);
@@ -787,11 +781,6 @@ void TransferSynthesis::ProcessSynthesis(
     return;
   }
 
-  // Filter out unpromising synthesis results
-  if (depth + 1 < ctx.maxDepth && !IsPromising(synthesis)) {
-    return;
-  }
-  
   synthesis.component.ShiftToFitTorus();
   unsigned componentCost = synthesis.component.Cost();
   miniDb.InsertIfBetterLazy(
