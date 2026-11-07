@@ -143,7 +143,7 @@ public:
       const LifeState &targetPattern,
       const std::vector<ComponentTemplate> &templates,
       const TemplateTree& templateTree,
-      const std::unordered_map<std::string, SearchResult> &minPaths,
+      int maxPrecursorPop,
       bool verbose = false);
 
   static void RunSynthesis(
@@ -222,7 +222,7 @@ std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesis
     const LifeState& targetPattern,
     const std::vector<ComponentTemplate>& templates,
     const TemplateTree& templateTree,
-    const std::unordered_map<std::string, SearchResult>& minPaths,
+    int maxPrecursorPop,
     bool verbose) {
 
   std::vector<SynthesisResult> results;
@@ -244,6 +244,7 @@ std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesis
 
       Component resultComp;
       resultComp.base = (targetPattern & ~transformedOut) | transformedBase;
+      if (resultComp.base.GetPop() > static_cast<unsigned>(maxPrecursorPop)) continue;
       resultComp.gliderSet = templ.gliderSet.Moved({anchor.x, anchor.y});
       resultComp.out = targetPattern;
 
@@ -738,9 +739,11 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx) {
     try {
       LifeState targetPattern = LifeState::DecodeApgcode(currentApgcode);
       auto orientations = targetPattern.SymmetryOrbit();
+      // The last step may use a database precursor above the intermediate limit.
+      int maxPop = depth == ctx.maxDepth - 1 ? std::numeric_limits<int>::max() : ctx.maxPrecursorPop;
       
       for (const LifeState& pattern : orientations) {
-        auto syntheses = FindSynthesisSteps(pattern, ctx.templates, ctx.templateTree, ctx.minPaths, ctx.verbose);
+        auto syntheses = FindSynthesisSteps(pattern, ctx.templates, ctx.templateTree, maxPop, ctx.verbose);
         
         for (auto& synthesis : syntheses) {
           ProcessSynthesis(synthesis, ctx, depth);
@@ -772,24 +775,6 @@ void TransferSynthesis::ProcessSynthesis(
     int depth) {
 
   if (ctx.forbiddenApgcodes.contains(synthesis.precursorApgcode)) {
-    return;
-  }
-
-  int maxPop = depth == ctx.maxDepth - 1 ? std::numeric_limits<int>::max() : ctx.maxPrecursorPop;
-  if (synthesis.component.base.GetPop() > maxPop) {
-    auto components = synthesis.component.base.StillComponents();
-
-    unsigned largest_pop = 0;
-
-    for (const auto &component : components) {
-      unsigned pop = component.GetPop();
-      if (pop > largest_pop) {
-        largest_pop = pop;
-      }
-    }
-    if(largest_pop > maxPop)
-      return;
-
     return;
   }
 
