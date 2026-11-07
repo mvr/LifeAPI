@@ -618,6 +618,9 @@ bool Component::IsUseful() const{
         return false;
     }
 
+    // Allow single-glider boat bit
+    if (gliderSet.Cost() == 1) return true;
+
     // Boat-bit filter: if a glider only creates a boat, drop the component
     static const LifeState boatOrients[4] = {
         LifeState::ConstantParse("b2o$obo$bo!"),
