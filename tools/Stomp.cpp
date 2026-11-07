@@ -237,6 +237,14 @@ std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesis
                        anchors,
                        verbose ? &dbg : nullptr);
 
+  // Exact patterns repeat across different glider reactions. The cache lasts
+  // only for this orientation, and equality checks the full pattern on collisions.
+  struct PatternHash {
+    size_t operator()(const LifeState& pattern) const { return pattern.GetHash(); }
+  };
+  std::unordered_map<LifeState,std::string,PatternHash> precursorCodes;
+  precursorCodes.reserve(anchors.size());
+
   for (const auto& anchor : anchors) {
     const ComponentTemplate& templ = templates[anchor.templateIndex];
     try {
@@ -253,9 +261,12 @@ std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesis
 
       if (!resultComp.SanityCheck()) continue;
 
-      std::string precursorApgcode = resultComp.base.EncodeApgcode();
-
-      results.emplace_back(resultComp, precursorApgcode, targetApgcode);
+      auto code = precursorCodes.find(resultComp.base);
+      if (code == precursorCodes.end()) {
+        auto encoded = resultComp.base.EncodeApgcode();
+        code = precursorCodes.emplace(resultComp.base,std::move(encoded)).first;
+      }
+      results.emplace_back(resultComp, code->second, targetApgcode);
     } catch (const std::exception&) {
       continue;
     }
