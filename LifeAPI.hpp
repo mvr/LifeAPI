@@ -1412,6 +1412,8 @@ LifeState LifeState::Convolve(const LifeState &other) const {
     // Annoying special case
     if (x == ~0ULL) {
       ConvolveInner(result, doubledother, ~0ULL, k, 0);
+      if ((~result).IsEmpty())
+        return result;
       continue;
     }
 
