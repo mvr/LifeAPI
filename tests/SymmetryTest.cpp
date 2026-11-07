@@ -76,6 +76,51 @@ void TestIntersectingOffset(StaticSymmetry s, std::pair<int, int> offset) {
   }
 }
 
+LifeState C4ImageAtOffset(const LifeState &state, SymmetryTransform transform,
+                          std::pair<int, int> offset) {
+  LifeState result = state;
+  result.Transform(transform);
+
+  using enum SymmetryTransform;
+  switch (transform) {
+  case Rotate90:
+    result.Move(offset);
+    return result;
+  case Rotate180OddBoth:
+    result.Move(offset.first - offset.second, offset.second + offset.first);
+    return result;
+  case Rotate270:
+    result.Move(-offset.second, offset.first);
+    return result;
+  default:
+    __builtin_unreachable();
+  }
+}
+
+LifeState ReferenceC4IntersectingOffsets(const LifeState &pat1,
+                                         const LifeState &pat2) {
+  LifeState result;
+  using enum SymmetryTransform;
+  for (int y = 0; y < 64; y++) {
+    for (int x = 0; x < 64; x++) {
+      const std::pair<int, int> offset{x, y};
+      for (auto transform : {Rotate90, Rotate180OddBoth, Rotate270}) {
+        if (!(C4ImageAtOffset(pat1, transform, offset) & pat2).IsEmpty()) {
+          result.Set(x, y);
+          break;
+        }
+      }
+    }
+  }
+  return result;
+}
+
+void ExpectC4IntersectingOffsetsMatchesReference(const LifeState &pat1,
+                                                 const LifeState &pat2) {
+  EXPECT_EQ(IntersectingOffsets(pat1, pat2, StaticSymmetry::C4),
+            ReferenceC4IntersectingOffsets(pat1, pat2));
+}
+
 TEST(SymmetryTest, IntersectingOffsets) {
   using enum StaticSymmetry;
   for (auto s : {C2, C4, }) {
@@ -93,4 +138,32 @@ TEST(SymmetryTest, IntersectingOffsets) {
     TestIntersectingOffset(D2diagodd, {i, 64 - i});
   for (int i = 0; i < 10; i++)
     TestIntersectingOffset(D2negdiagodd, {i, i});
+}
+
+TEST(SymmetryTest, C4IntersectingOffsetsMatchesShiftedImageReference) {
+  ExpectC4IntersectingOffsetsMatchesReference(LifeState::Cell({0, 0}),
+                                              LifeState::Cell({0, 1}));
+  ExpectC4IntersectingOffsetsMatchesReference(LifeState::Cell({0, 0}),
+                                              LifeState::Cell({1, 63}));
+
+  for (int ax = 0; ax < 4; ax++) {
+    for (int ay = 0; ay < 4; ay++) {
+      for (int bx = 0; bx < 4; bx++) {
+        for (int by = 0; by < 4; by++) {
+          ExpectC4IntersectingOffsetsMatchesReference(
+              LifeState::Cell({ax, ay}), LifeState::Cell({bx, by}));
+        }
+      }
+    }
+  }
+
+  for (int t = 0; t < 10; t++) {
+    LifeState pat1;
+    LifeState pat2;
+    for (int i = 0; i < 6; i++) {
+      pat1.Set((t * 17 + i * 7) % 64, (t * 23 + i * 11) % 64);
+      pat2.Set((t * 19 + i * 5 + 3) % 64, (t * 29 + i * 13 + 1) % 64);
+    }
+    ExpectC4IntersectingOffsetsMatchesReference(pat1, pat2);
+  }
 }

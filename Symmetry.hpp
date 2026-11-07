@@ -736,15 +736,21 @@ inline LifeState IntersectingOffsets(const LifeState &pat1, const LifeState &pat
     case StaticSymmetry::C4: {
       transformed = pat1;
       transformed.Transform(Rotate270);
+      LifeState result = pat2.Convolve(transformed);
 
-      // // Very inefficient
-      // LifeState doubledcollisions = pat2.Convolve(pat1);
-      // doubledcollisions.Transform(ReflectAcrossYeqNegXP1);
-      // doubledcollisions = doubledcollisions.Skew().HalveY();
-      // doubledcollisions.Transform(ReflectAcrossYeqNegXP1);
-      // doubledcollisions = doubledcollisions.InvSkew();
+      transformed = pat1;
+      transformed.Transform(Rotate90);
+      LifeState rotate270Collisions = pat2.Convolve(transformed);
+      rotate270Collisions.Transform(Rotate270);
+      result |= rotate270Collisions;
 
-      return pat2.Convolve(transformed); // | doubledcollisions;
+      LifeState doubledcollisions = pat2.Convolve(pat1);
+      doubledcollisions.Transform(ReflectAcrossYeqNegXP1);
+      doubledcollisions = doubledcollisions.Skew().HalveY();
+      doubledcollisions.Transform(ReflectAcrossYeqNegXP1);
+      doubledcollisions = doubledcollisions.InvSkew();
+
+      return result | doubledcollisions;
     }
     case StaticSymmetry::D2AcrossX:
       transformed = pat1;
