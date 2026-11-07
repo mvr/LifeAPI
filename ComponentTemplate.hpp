@@ -205,13 +205,11 @@ std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int> ComponentTe
 
 uint64_t ComponentTemplate::GetHashNonSymmetrised() const {
   uint64_t hash = base.GetHash();
-  // hash = combine_hashes(hash, knownOff.GetHash());
+  hash = combine_hashes(hash, knownOff.GetHash());
   hash = combine_hashes(hash, out.GetHash());
   hash = combine_hashes(hash, count.bit0.GetHash());
   hash = combine_hashes(hash, count.bit1.GetHash());
   hash = combine_hashes(hash, count.bit2.GetHash());
-  hash = combine_hashes(hash, stable1.GetHash());
-  hash = combine_hashes(hash, stable2.GetHash());
   return hash;
 }
 
