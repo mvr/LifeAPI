@@ -6,6 +6,9 @@
 #include <functional>
 #include <algorithm>
 #include <iostream>
+#include <array>
+#include <cstdint>
+#include <tuple>
 
 #include "../ComponentTemplate.hpp"
 
@@ -24,6 +27,17 @@ struct TemplateFeature {
   bool expectsLive; // true for out/count, false for knownOff
 };
 
+struct TemplateLeafEntry {
+  int templateIndex;
+  int dx = 0, dy = 0;
+  bool fixedTranslation = false;
+};
+
+struct TemplateMatchCell {
+  uint8_t x, y;
+  uint8_t field; // out, count0, count1, count2, knownOff
+};
+
 struct TemplateTreeNode {
   bool leaf = true;
   int dx = 0;
@@ -32,13 +46,14 @@ struct TemplateTreeNode {
   int yesChild = -1; // target live at (dx,dy)
   int noChild = -1;  // target dead at (dx,dy)
   int maybeChild = -1; // unconstrained templates continue here
-  std::vector<int> templateIndices;
+  std::vector<TemplateLeafEntry> templates;
 };
 
 struct TemplateTree {
   std::vector<TemplateTreeNode> nodes;
   int root = -1;
   std::vector<std::vector<TemplateFeature>> features;
+  std::vector<std::vector<TemplateMatchCell>> matchCells;
 };
 
 struct TemplateAnchor {
@@ -65,6 +80,8 @@ struct TraversalDebug {
   size_t templatesVisited = 0;
   size_t anchorsFound = 0;
   size_t pruned = 0;
+  size_t boundedTemplates = 0;
+  size_t fullTemplates = 0;
 };
 
 inline std::vector<TemplateFeature> CollectFeatures(const ComponentTemplate& templ) {
@@ -90,6 +107,26 @@ inline std::vector<TemplateFeature> CollectFeatures(const ComponentTemplate& tem
   // addLive(templ.count.bit3, SplitField::Count3Live);
 
   return result;
+}
+
+inline std::vector<TemplateMatchCell> CollectMatchCells(const ComponentTemplate& templ) {
+  std::vector<TemplateMatchCell> cells;
+  uint8_t field = 0;
+  for (const auto* mask : {&templ.out, &templ.count.bit0, &templ.count.bit1,
+                           &templ.count.bit2, &templ.knownOff}) {
+    for (auto [x,y] : mask->OnCells())
+      cells.push_back({uint8_t(x),uint8_t(y),field});
+    ++field;
+  }
+  return cells;
+}
+
+inline bool MatchesAt(const std::vector<TemplateMatchCell>& cells,
+                      const std::array<const LifeState*,5>& fields, int dx, int dy) {
+  for (const auto& cell : cells)
+    if (fields[cell.field]->GetSafe(dx+cell.x,dy+cell.y) != (cell.field != 4))
+      return false;
+  return true;
 }
 
 inline LifeState FieldMask(const LifeState& targetState,
@@ -149,6 +186,18 @@ struct TemplateEntry {
   LifeState mask; // allowed translations consistent with splits on the path
 };
 
+inline void SetLeafEntries(TemplateTreeNode& node, const std::vector<TemplateEntry>& entries) {
+  node.templates.reserve(entries.size());
+  for (const auto& entry : entries) {
+    TemplateLeafEntry leaf{entry.index};
+    if (entry.mask.GetPop()==1) {
+      std::tie(leaf.dx,leaf.dy)=entry.mask.FirstOn();
+      leaf.fixedTranslation=true;
+    }
+    node.templates.push_back(leaf);
+  }
+}
+
 inline int BuildNode(const std::vector<TemplateEntry>& entries,
               TemplateTree& tree,
               unsigned leafSize,
@@ -172,8 +221,7 @@ inline int BuildNode(const std::vector<TemplateEntry>& entries,
 
   if (entries.size() <= leafSize || depth >= depthLimit) {
     node.leaf = true;
-    node.templateIndices.reserve(entries.size());
-    for (const auto& e : entries) node.templateIndices.push_back(e.index);
+    SetLeafEntries(node, entries);
     tree.nodes.push_back(std::move(node));
     nodesBuilt++;
     if (verbose) {
@@ -199,8 +247,7 @@ inline int BuildNode(const std::vector<TemplateEntry>& entries,
   } else {
     if (freq.empty()) {
       node.leaf = true;
-      node.templateIndices.reserve(entries.size());
-      for (const auto& e : entries) node.templateIndices.push_back(e.index);
+      SetLeafEntries(node, entries);
       tree.nodes.push_back(std::move(node));
       return static_cast<int>(tree.nodes.size() - 1);
     }
@@ -260,8 +307,7 @@ inline int BuildNode(const std::vector<TemplateEntry>& entries,
   if (bestScore < 0 || (bestStats.yes == 0 && bestStats.no == 0) ||
       (totalHere > 0 && definiteHere < static_cast<int>(minDefiniteFraction * totalHere))) {
     node.leaf = true;
-    node.templateIndices.reserve(entries.size());
-    for (const auto& e : entries) node.templateIndices.push_back(e.index);
+    SetLeafEntries(node, entries);
     tree.nodes.push_back(std::move(node));
     return static_cast<int>(tree.nodes.size() - 1);
   }
@@ -330,6 +376,7 @@ inline TemplateTree BuildTemplateTree(std::vector<ComponentTemplate>& templates,
                                double minDefiniteFraction) {
   TemplateTree tree;
   tree.features.reserve(templates.size());
+  tree.matchCells.reserve(templates.size());
   for (auto& templ : templates) {
     templ.NormalisePosition();
     if (!templ.out.IsEmpty()) {
@@ -337,6 +384,7 @@ inline TemplateTree BuildTemplateTree(std::vector<ComponentTemplate>& templates,
       templ = templ.Moved({-anchor.first, -anchor.second});
     }
     tree.features.push_back(CollectFeatures(templ));
+    tree.matchCells.push_back(CollectMatchCells(templ));
   }
 
   std::vector<TemplateEntry> rootEntries;
@@ -384,12 +432,30 @@ inline void TraverseTemplateTree(
   if (node.leaf) {
     if (dbg) dbg->leavesVisited++;
 
-    for (int templIdx : node.templateIndices) {
+    // Tree anchors and template placements differ by the entry's translation.
+    // Check small candidate sets directly; retain convolution for larger sets
+    // and entries with more than one possible relative translation.
+    constexpr unsigned maxDirectCandidates = 8;
+    unsigned candidateCount = candidateMask.GetPop();
+    const std::array<const LifeState*,5> fields{
+        &targetState,&targetCount.bit0,&targetCount.bit1,&targetCount.bit2,&targetState};
+    for (const auto& entry : node.templates) {
+      int templIdx = entry.templateIndex;
       if (dbg) dbg->templatesVisited++;
-      const ComponentTemplate& templ = templates[templIdx];
-      LifeState matches = templ.MatchReverseMirrored(targetStateMirrored,
-      targetCountMirrored); for (auto [x, y] : matches.OnCells()) {
-        results.push_back({templIdx, -x, -y}); // Record mirrored
+      LifeState matches;
+      if (entry.fixedTranslation && candidateCount <= maxDirectCandidates) {
+        if (dbg) dbg->boundedTemplates++;
+        for (auto [x,y] : candidateMask.OnCells()) {
+          x+=entry.dx; y+=entry.dy;
+          if (MatchesAt(tree.matchCells[templIdx],fields,x,y))
+            matches.SetSafe(-x,-y);
+        }
+      } else {
+        if (dbg) dbg->fullTemplates++;
+        matches = templates[templIdx].MatchReverseMirrored(targetStateMirrored,targetCountMirrored);
+      }
+      for (auto [x,y] : matches.OnCells()) {
+        results.push_back({templIdx,-x,-y});
         if (dbg) dbg->anchorsFound++;
       }
     }
