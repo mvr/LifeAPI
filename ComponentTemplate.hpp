@@ -19,6 +19,7 @@ struct ComponentTemplate {
   LifeState out;
 
   bool operator==(const ComponentTemplate&) const = default;
+  bool operator<(const ComponentTemplate& other) const;
 
   static ComponentTemplate FromComponent(const Component &component);
   LifeState MatchReverse(const LifeState &state, const NeighbourCount &count) const;
@@ -29,6 +30,7 @@ struct ComponentTemplate {
   ComponentTemplate Moved(std::pair<int, int> p) const;
 
   void NormalisePosition();
+  std::pair<int, int> NormalisingOffset() const;
   // Try to shift glider set to fit in 64x64 torus without wrapping
   void ShiftToFitTorus();
   // Canonicalise a template: find the symmetry/offset that minimises base/out hash
@@ -180,18 +182,52 @@ ComponentTemplate ComponentTemplate::Moved(std::pair<int, int> p) const {
   };
 }
 
+std::pair<int, int> ComponentTemplate::NormalisingOffset() const {
+  const auto& anchor = base.IsEmpty() ? out : base;
+  if (anchor.IsEmpty()) return {0,0};
+  auto [xs,ys] = anchor.ToroidalBoundsStarts();
+  if (std::has_single_bit(xs) && std::has_single_bit(ys))
+    return {-int(std::countr_zero(xs)), -int(std::countr_zero(ys))};
+
+  // Tied gaps must be resolved using the geometry, then the full template,
+  // rather than their absolute positions on the torus.
+  uint64_t bestHash = ~uint64_t(0);
+  ComponentTemplate best;
+  std::pair<int,int> offset;
+  bool found = false;
+  for (uint64_t xChoices=xs; xChoices; xChoices &= xChoices-1)
+    for (uint64_t yChoices=ys; yChoices; yChoices &= yChoices-1) {
+      std::pair<int,int> candidate{-int(std::countr_zero(xChoices)), -int(std::countr_zero(yChoices))};
+      auto t = Moved(candidate);
+      auto hash = combine_hashes(t.base.GetHash(),t.out.GetHash());
+      if (!found || hash < bestHash || (hash == bestHash && t < best)) {
+        found = true; bestHash = hash; best = std::move(t); offset = candidate;
+      }
+    }
+  return offset;
+}
+
 void ComponentTemplate::NormalisePosition() {
-  std::array<int, 4> bounds = base.XYBounds();
-
-  if (base.IsEmpty())
-    bounds = out.XYBounds();
-
-  *this = Moved({-bounds[0], -bounds[1]});
+  *this = Moved(NormalisingOffset());
 }
 
 void ComponentTemplate::ShiftToFitTorus() {
   auto offset = gliderSet.OffsetToFitTorus();
   *this = Moved(offset);
+}
+
+bool ComponentTemplate::operator<(const ComponentTemplate& other) const {
+    // Requirements first, then the salvo, for a stable representative.
+    for (auto [a,b] : {std::pair{&base,&other.base}, {&out,&other.out}, {&knownOff,&other.knownOff},
+                       {&count.bit0,&other.count.bit0}, {&count.bit1,&other.count.bit1}, {&count.bit2,&other.count.bit2},
+                       {&stable1,&other.stable1}, {&stable2,&other.stable2},
+                       {&gliderSet.se,&other.gliderSet.se}, {&gliderSet.sw,&other.gliderSet.sw},
+                       {&gliderSet.nw,&other.gliderSet.nw}, {&gliderSet.ne,&other.gliderSet.ne},
+                       {&count.bit3,&other.count.bit3}}) {
+        for (unsigned i=0;i<N;++i)
+            if (a->state[i]!=b->state[i]) return a->state[i]<b->state[i];
+    }
+    return false;
 }
 
 std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int> ComponentTemplate::Canonicalise() const {
@@ -205,12 +241,10 @@ std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int> ComponentTe
     for (auto transform : {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY,
                            Rotate90, Rotate180OddBoth, Rotate270, ReflectAcrossYeqNegXP1}) {
         ComponentTemplate t = this->Transformed(transform);
-        auto bounds = t.base.IsEmpty() ? t.out.XYBounds() : t.base.XYBounds();
-        int dx = -bounds[0];
-        int dy = -bounds[1];
+        auto [dx,dy] = t.NormalisingOffset();
         t = t.Moved({dx, dy});
         uint64_t hash = combine_hashes(t.base.GetHash(), t.out.GetHash());
-        if (minHash == 0 || hash < minHash) {
+        if (minHash == 0 || hash < minHash || (hash == minHash && t < best)) {
             minHash = hash;
             best = t;
             bestT = transform;

@@ -494,6 +494,31 @@ struct __attribute__((aligned(64))) LifeState {
     return result;
   }
 
+  // Starting columns and rows of all minimum-width toroidal bounds.
+  // Each set bit is an occupied coordinate immediately after a largest empty
+  // gap. Empty states return two empty masks; callers resolve any ties.
+  std::pair<uint64_t, uint64_t> ToroidalBoundsStarts() const {
+    auto starts = [](auto occupied) {
+      uint64_t choices = 0;
+      auto remaining = occupied;
+      int largestGap = -1;
+      while (remaining) {
+        unsigned start = std::countr_zero(remaining);
+        int gap = std::countl_zero(std::rotr(occupied, start));
+        if (gap > largestGap) { largestGap = gap; choices = 0; }
+        if (gap == largestGap) choices |= uint64_t(1) << start;
+        remaining &= remaining - 1;
+      }
+      return choices;
+    };
+    uint64_t rows = 0;
+    for (auto col : state) rows |= col;
+    if constexpr (N == 32)
+      return {starts(uint32_t(PopulatedColumns())), starts(rows)};
+    else
+      return {starts(PopulatedColumns()), starts(rows)};
+  }
+
   std::pair<int, int> WidthHeight() const {
     uint64_t orOfCols = 0;
     for (unsigned i = 0; i < N; ++i)
