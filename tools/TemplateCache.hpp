@@ -95,27 +95,28 @@ std::vector<ComponentTemplate> TemplateCache::LoadTemplatesFromFiles(
     return combined;
 }
 
-std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
-    std::vector<ComponentTemplate> templates,
-    unsigned minOccurrences,
-    bool verbose,
-    bool pruneGenerality) {
+std::vector<ComponentTemplate>
+TemplateCache::CombineAndDeduplicateTemplates(std::vector<ComponentTemplate> templates,
+                                              unsigned minOccurrences, bool verbose,
+                                              bool pruneGenerality) {
 
-    auto isSubset = [](const LifeState& a, const LifeState& b) {
-        return (a & ~b).IsEmpty();
-    };
+    auto isSubset = [](const LifeState& a, const LifeState& b) { return (a & ~b).IsEmpty(); };
 
     if (verbose) {
         std::cerr << "Combining and deduplicating " << templates.size()
                   << " templates across all files" << std::endl;
     }
-    
+
     // Count occurrences
-    std::unordered_map<uint64_t, std::tuple<ComponentTemplate, unsigned>> templateCounts; // template, count
+    std::unordered_map<uint64_t, std::tuple<ComponentTemplate, unsigned>>
+        templateCounts; // template, count
     for (const auto& templ : templates) {
         uint64_t hash;
         auto [canon, liveHash, transform, dx, dy] = templ.Canonicalise(&hash);
-        (void)liveHash; (void)transform; (void)dx; (void)dy;
+        (void)liveHash;
+        (void)transform;
+        (void)dx;
+        (void)dy;
         auto it = templateCounts.find(hash);
         if (it == templateCounts.end()) {
             templateCounts[hash] = std::make_tuple(std::move(canon), 1);
@@ -123,17 +124,18 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
             auto& [existingTempl, count] = it->second;
             count++;
             if (canon.gliderSet.Cost() < existingTempl.gliderSet.Cost() ||
-                (canon.gliderSet.Cost() == existingTempl.gliderSet.Cost() && canon < existingTempl)) {
+                (canon.gliderSet.Cost() == existingTempl.gliderSet.Cost() &&
+                 canon < existingTempl)) {
                 existingTempl = std::move(canon);
             }
         }
     }
-    
+
     // Filter by minimum occurrences, then group by canonical base/out
     std::vector<ComponentTemplate> candidates;
     candidates.reserve(templateCounts.size());
     unsigned totalTemplates = templateCounts.size();
-    
+
     for (const auto& [hash, tuple] : templateCounts) {
         const auto& [templ, count] = tuple;
         if (count >= minOccurrences) {
@@ -152,44 +154,54 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
 
     for (auto& [key, vec] : groups) {
         if (!pruneGenerality) {
-            for (auto& t : vec) result.push_back(std::move(t));
+            for (auto& t : vec)
+                result.push_back(std::move(t));
             continue;
         }
-        std::sort(vec.begin(), vec.end(), [](const ComponentTemplate& a, const ComponentTemplate& b) {
-            if (a.gliderSet.Cost() != b.gliderSet.Cost()) return a.gliderSet.Cost() < b.gliderSet.Cost();
-            return a < b;
-        });
+        std::sort(vec.begin(), vec.end(),
+                  [](const ComponentTemplate& a, const ComponentTemplate& b) {
+                      if (a.gliderSet.Cost() != b.gliderSet.Cost())
+                          return a.gliderSet.Cost() < b.gliderSet.Cost();
+                      return a < b;
+                  });
         // Symmetries of the common live geometry may align the constraints
         // differently even after canonicalization.
-        std::vector<std::tuple<SymmetryTransform,int,int>> alignments;
+        std::vector<std::tuple<SymmetryTransform, int, int>> alignments;
         using enum SymmetryTransform;
-        for (auto tf : {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY,
-                        Rotate90, Rotate180OddBoth, Rotate270, ReflectAcrossYeqNegXP1}) {
+        for (auto tf : {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY, Rotate90,
+                        Rotate180OddBoth, Rotate270, ReflectAcrossYeqNegXP1}) {
             auto base = vec.front().base.Transformed(tf), out = vec.front().out.Transformed(tf);
-            bool useBase = !base.IsEmpty() && (out.IsEmpty() || base.GetPop()<=out.GetPop());
+            bool useBase = !base.IsEmpty() && (out.IsEmpty() || base.GetPop() <= out.GetPop());
             const auto& anchor = useBase ? base : out;
             const auto& reference = useBase ? vec.front().base : vec.front().out;
-            if (anchor.IsEmpty()) { alignments.emplace_back(tf,0,0); continue; }
-            auto [x,y] = anchor.FirstOn();
-            for (auto [rx,ry] : reference.OnCells()) {
-                int dx = rx-x, dy = ry-y;
-                if (base.Moved(dx,dy)==vec.front().base && out.Moved(dx,dy)==vec.front().out)
-                    alignments.emplace_back(tf,dx,dy);
+            if (anchor.IsEmpty()) {
+                alignments.emplace_back(tf, 0, 0);
+                continue;
+            }
+            auto [x, y] = anchor.FirstOn();
+            for (auto [rx, ry] : reference.OnCells()) {
+                int dx = rx - x, dy = ry - y;
+                if (base.Moved(dx, dy) == vec.front().base && out.Moved(dx, dy) == vec.front().out)
+                    alignments.emplace_back(tf, dx, dy);
             }
         }
         auto isMoreGeneral = [&](const ComponentTemplate& a, const ComponentTemplate& b) {
-            if (a.gliderSet.Cost()>b.gliderSet.Cost() || a.base!=b.base || a.out!=b.out) return false;
-            for (auto [tf,dx,dy] : alignments) {
-                if (tf==Identity && dx==0 && dy==0) {
-                    if (isSubset(a.knownOff,b.knownOff) && isSubset(a.count.bit0,b.count.bit0) &&
-                        isSubset(a.count.bit1,b.count.bit1) && isSubset(a.count.bit2,b.count.bit2) &&
-                        isSubset(a.stable1,b.stable1) && isSubset(a.stable2,b.stable2)) return true;
-                } else if (isSubset(a.knownOff.Transformed(tf).Moved(dx,dy),b.knownOff) &&
-                           isSubset(a.count.bit0.Transformed(tf).Moved(dx,dy),b.count.bit0) &&
-                           isSubset(a.count.bit1.Transformed(tf).Moved(dx,dy),b.count.bit1) &&
-                           isSubset(a.count.bit2.Transformed(tf).Moved(dx,dy),b.count.bit2) &&
-                           isSubset(a.stable1.Transformed(tf).Moved(dx,dy),b.stable1) &&
-                           isSubset(a.stable2.Transformed(tf).Moved(dx,dy),b.stable2)) return true;
+            if (a.gliderSet.Cost() > b.gliderSet.Cost() || a.base != b.base || a.out != b.out)
+                return false;
+            for (auto [tf, dx, dy] : alignments) {
+                if (tf == Identity && dx == 0 && dy == 0) {
+                    if (isSubset(a.knownOff, b.knownOff) && isSubset(a.count.bit0, b.count.bit0) &&
+                        isSubset(a.count.bit1, b.count.bit1) &&
+                        isSubset(a.count.bit2, b.count.bit2) && isSubset(a.stable1, b.stable1) &&
+                        isSubset(a.stable2, b.stable2))
+                        return true;
+                } else if (isSubset(a.knownOff.Transformed(tf).Moved(dx, dy), b.knownOff) &&
+                           isSubset(a.count.bit0.Transformed(tf).Moved(dx, dy), b.count.bit0) &&
+                           isSubset(a.count.bit1.Transformed(tf).Moved(dx, dy), b.count.bit1) &&
+                           isSubset(a.count.bit2.Transformed(tf).Moved(dx, dy), b.count.bit2) &&
+                           isSubset(a.stable1.Transformed(tf).Moved(dx, dy), b.stable1) &&
+                           isSubset(a.stable2.Transformed(tf).Moved(dx, dy), b.stable2))
+                    return true;
             }
             return false;
         };
@@ -202,10 +214,12 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
                     break;
                 }
             }
-            if (dominated) continue;
+            if (dominated)
+                continue;
             // Drop any kept templates that t generalises
-            kept.erase(std::remove_if(kept.begin(), kept.end(),
-                                      [&](const ComponentTemplate& other) { return isMoreGeneral(t, other); }),
+            kept.erase(std::remove_if(
+                           kept.begin(), kept.end(),
+                           [&](const ComponentTemplate& other) { return isMoreGeneral(t, other); }),
                        kept.end());
             kept.push_back(std::move(t));
         }
@@ -213,14 +227,13 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
             result.push_back(std::move(t));
         }
     }
-    
+
     if (verbose) {
-        std::cerr << "Combined " << totalTemplates << " unique templates, filtered to " 
+        std::cerr << "Combined " << totalTemplates << " unique templates, filtered to "
                   << result.size() << " (occurring ≥" << minOccurrences << " times"
-                  << (pruneGenerality ? ", after generality pruning" : "")
-                  << ")" << std::endl;
+                  << (pruneGenerality ? ", after generality pruning" : "") << ")" << std::endl;
     }
-    
+
     std::sort(result.begin(), result.end());
     return result;
 }
@@ -282,91 +295,92 @@ std::string TemplateCache::GenerateCacheKeyForFile(const std::string& filePath) 
     return hexStream.str();
 }
 
-bool TemplateCache::ReadTemplatesCacheFile(const std::string& cacheFile, std::vector<ComponentTemplate>& templates) {
+bool TemplateCache::ReadTemplatesCacheFile(const std::string& cacheFile,
+                                           std::vector<ComponentTemplate>& templates) {
     try {
         std::ifstream file(cacheFile, std::ios::binary);
         if (!file.is_open()) {
             return false;
         }
-        
+
         // Read number of templates
         size_t count;
         file.read(reinterpret_cast<char*>(&count), sizeof(count));
         if (file.fail()) {
             return false;
         }
-        
+
         templates.clear();
         templates.reserve(count);
-        
+
         for (size_t i = 0; i < count; i++) {
             ComponentTemplate templ;
-            
+
             // Read each field as RLE string
             size_t dataSize;
-            
+
             // Read base
             file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
             std::vector<char> data(dataSize);
             file.read(data.data(), dataSize);
             templ.base = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
-            
-            // Read knownOff  
+
+            // Read knownOff
             file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
             data.resize(dataSize);
             file.read(data.data(), dataSize);
             templ.knownOff = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
-            
+
             // Read out
             file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
             data.resize(dataSize);
             file.read(data.data(), dataSize);
             templ.out = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
-            
+
             // Read gliderSet (4 LifeStates: se, sw, nw, ne)
             file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
             data.resize(dataSize);
             file.read(data.data(), dataSize);
             LifeState se = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
-            
+
             file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
             data.resize(dataSize);
             file.read(data.data(), dataSize);
             LifeState sw = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
-            
+
             file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
             data.resize(dataSize);
             file.read(data.data(), dataSize);
             LifeState nw = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
-            
+
             file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
             data.resize(dataSize);
             file.read(data.data(), dataSize);
             LifeState ne = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
-            
+
             templ.gliderSet = GliderSet(se, sw, nw, ne);
-            
+
             // Read NeighbourCount (4 LifeStates: bit0, bit1, bit2, bit3)
             file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
             data.resize(dataSize);
             file.read(data.data(), dataSize);
             LifeState bit0 = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
-            
+
             file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
             data.resize(dataSize);
             file.read(data.data(), dataSize);
             LifeState bit1 = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
-            
+
             file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
             data.resize(dataSize);
             file.read(data.data(), dataSize);
             LifeState bit2 = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
-            
+
             file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
             data.resize(dataSize);
             file.read(data.data(), dataSize);
             LifeState bit3 = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
-            
+
             templ.count = NeighbourCount(bit3, bit2, bit1, bit0);
 
             file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
@@ -377,86 +391,87 @@ bool TemplateCache::ReadTemplatesCacheFile(const std::string& cacheFile, std::ve
             data.resize(dataSize);
             file.read(data.data(), dataSize);
             templ.stable2 = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
-            
+
             if (file.fail()) {
                 return false;
             }
-            
+
             templates.push_back(templ);
         }
-        
+
         return true;
-        
+
     } catch (const std::exception&) {
         return false;
     }
 }
 
-void TemplateCache::WriteTemplatesCacheFile(const std::string& cacheFile, const std::vector<ComponentTemplate>& templates) {
+void TemplateCache::WriteTemplatesCacheFile(const std::string& cacheFile,
+                                            const std::vector<ComponentTemplate>& templates) {
     try {
         std::ofstream file(cacheFile, std::ios::binary);
         if (!file.is_open()) {
             return;
         }
-        
+
         // Write number of templates
         size_t count = templates.size();
         file.write(reinterpret_cast<const char*>(&count), sizeof(count));
-        
+
         for (const auto& templ : templates) {
             // Write each field as RLE string
             std::string baseRLE = templ.base.RLE();
             size_t dataSize = baseRLE.size();
             file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
             file.write(baseRLE.data(), dataSize);
-            
+
             std::string knownOffRLE = templ.knownOff.RLE();
             dataSize = knownOffRLE.size();
             file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
             file.write(knownOffRLE.data(), dataSize);
-            
+
             std::string outRLE = templ.out.RLE();
             dataSize = outRLE.size();
             file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
             file.write(outRLE.data(), dataSize);
-            
+
             // Write gliderSet (4 LifeStates: se, sw, nw, ne)
             std::string seRLE = templ.gliderSet.se.RLE();
             dataSize = seRLE.size();
             file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
             file.write(seRLE.data(), dataSize);
-            
+
             std::string swRLE = templ.gliderSet.sw.RLE();
             dataSize = swRLE.size();
             file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
             file.write(swRLE.data(), dataSize);
-            
+
             std::string nwRLE = templ.gliderSet.nw.RLE();
             dataSize = nwRLE.size();
             file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
             file.write(nwRLE.data(), dataSize);
-            
+
             std::string neRLE = templ.gliderSet.ne.RLE();
             dataSize = neRLE.size();
             file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
             file.write(neRLE.data(), dataSize);
-            
+
             // Write NeighbourCount (4 LifeStates: bit3, bit2, bit1, bit0)
             std::string bit0RLE = templ.count.bit0.RLE();
             dataSize = bit0RLE.size();
             file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
             file.write(bit0RLE.data(), dataSize);
-            
+
             std::string bit1RLE = templ.count.bit1.RLE();
             dataSize = bit1RLE.size();
             file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
             file.write(bit1RLE.data(), dataSize);
-            
+
             std::string bit2RLE = templ.count.bit2.RLE();
             dataSize = bit2RLE.size();
             file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
             file.write(bit2RLE.data(), dataSize);
-            
+
             std::string bit3RLE = templ.count.bit3.RLE();
             dataSize = bit3RLE.size();
             file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
@@ -469,26 +484,25 @@ void TemplateCache::WriteTemplatesCacheFile(const std::string& cacheFile, const 
                 file.write(rle.data(), dataSize);
             }
         }
-        
+
     } catch (const std::exception&) {
         // Silently fail cache writes
     }
 }
 
-std::vector<ComponentTemplate> TemplateCache::ExtractTemplatesFromComponentsFile(
-    const std::string& filePath,
-    bool verbose) {
-    
+std::vector<ComponentTemplate>
+TemplateCache::ExtractTemplatesFromComponentsFile(const std::string& filePath, bool verbose) {
+
     if (verbose) {
         std::cerr << "Extracting templates from " << filePath << std::endl;
     }
-    
+
     // Load components from single file
     std::vector<Component> components = ReadComponentsFromFile(filePath, verbose);
-    
+
     // Extract unique templates (no occurrence filtering at file level)
     std::unordered_map<uint64_t, ComponentTemplate> uniqueTemplates;
-    
+
     for (const Component& comp : components) {
         try {
             if (!comp.IsUseful()) {
@@ -497,15 +511,20 @@ std::vector<ComponentTemplate> TemplateCache::ExtractTemplatesFromComponentsFile
                 }
                 continue;
             }
-            
+
             uint64_t hash;
-            auto [templ, liveHash, transform, dx, dy] = ComponentTemplate::FromComponent(comp).Canonicalise(&hash);
-            (void)liveHash; (void)transform; (void)dx; (void)dy;
+            auto [templ, liveHash, transform, dx, dy] =
+                ComponentTemplate::FromComponent(comp).Canonicalise(&hash);
+            (void)liveHash;
+            (void)transform;
+            (void)dx;
+            (void)dy;
             auto it = uniqueTemplates.find(hash);
             if (it == uniqueTemplates.end()) {
                 uniqueTemplates[hash] = templ;
             } else if (templ.gliderSet.Cost() < it->second.gliderSet.Cost() ||
-                       (templ.gliderSet.Cost() == it->second.gliderSet.Cost() && templ < it->second)) {
+                       (templ.gliderSet.Cost() == it->second.gliderSet.Cost() &&
+                        templ < it->second)) {
                 it->second = templ;
             }
 
@@ -515,18 +534,18 @@ std::vector<ComponentTemplate> TemplateCache::ExtractTemplatesFromComponentsFile
             }
         }
     }
-    
+
     // Convert to vector
     std::vector<ComponentTemplate> result;
     for (const auto& [hash, templ] : uniqueTemplates) {
         result.push_back(templ);
     }
-    
+
     if (verbose) {
-        std::cerr << "Extracted " << result.size() << " unique templates from " 
-                  << components.size() << " components in " << filePath << std::endl;
+        std::cerr << "Extracted " << result.size() << " unique templates from " << components.size()
+                  << " components in " << filePath << std::endl;
     }
-    
+
     return result;
 }
 

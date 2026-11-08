@@ -505,14 +505,19 @@ struct __attribute__((aligned(64))) LifeState {
       while (remaining) {
         unsigned start = std::countr_zero(remaining);
         int gap = std::countl_zero(std::rotr(occupied, start));
-        if (gap > largestGap) { largestGap = gap; choices = 0; }
-        if (gap == largestGap) choices |= uint64_t(1) << start;
+        if (gap > largestGap) {
+          largestGap = gap;
+          choices = 0;
+        }
+        if (gap == largestGap)
+          choices |= uint64_t(1) << start;
         remaining &= remaining - 1;
       }
       return choices;
     };
     uint64_t rows = 0;
-    for (auto col : state) rows |= col;
+    for (auto col : state)
+      rows |= col;
     if constexpr (N == 32)
       return {starts(uint32_t(PopulatedColumns())), starts(rows)};
     else

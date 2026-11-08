@@ -112,19 +112,19 @@ inline std::vector<TemplateFeature> CollectFeatures(const ComponentTemplate& tem
 inline std::vector<TemplateMatchCell> CollectMatchCells(const ComponentTemplate& templ) {
   std::vector<TemplateMatchCell> cells;
   uint8_t field = 0;
-  for (const auto* mask : {&templ.out, &templ.count.bit0, &templ.count.bit1,
-                           &templ.count.bit2, &templ.knownOff}) {
-    for (auto [x,y] : mask->OnCells())
-      cells.push_back({uint8_t(x),uint8_t(y),field});
+  for (const auto* mask :
+       {&templ.out, &templ.count.bit0, &templ.count.bit1, &templ.count.bit2, &templ.knownOff}) {
+    for (auto [x, y] : mask->OnCells())
+      cells.push_back({uint8_t(x), uint8_t(y), field});
     ++field;
   }
   return cells;
 }
 
 inline bool MatchesAt(const std::vector<TemplateMatchCell>& cells,
-                      const std::array<const LifeState*,5>& fields, int dx, int dy) {
+                      const std::array<const LifeState*, 5>& fields, int dx, int dy) {
   for (const auto& cell : cells)
-    if (fields[cell.field]->GetSafe(dx+cell.x,dy+cell.y) != (cell.field != 4))
+    if (fields[cell.field]->GetSafe(dx + cell.x, dy + cell.y) != (cell.field != 4))
       return false;
   return true;
 }
@@ -190,9 +190,9 @@ inline void SetLeafEntries(TemplateTreeNode& node, const std::vector<TemplateEnt
   node.templates.reserve(entries.size());
   for (const auto& entry : entries) {
     TemplateLeafEntry leaf{entry.index};
-    if (entry.mask.GetPop()==1) {
-      std::tie(leaf.dx,leaf.dy)=entry.mask.FirstOn();
-      leaf.fixedTranslation=true;
+    if (entry.mask.GetPop() == 1) {
+      std::tie(leaf.dx, leaf.dy) = entry.mask.FirstOn();
+      leaf.fixedTranslation = true;
     }
     node.templates.push_back(leaf);
   }
@@ -406,66 +406,72 @@ inline TemplateTree BuildTemplateTree(std::vector<ComponentTemplate>& templates,
   return tree;
 }
 
-inline void TraverseTemplateTree(
-    int nodeIdx,
-    const TemplateTree& tree,
-    const LifeState& targetState,
-    const NeighbourCount& targetCount,
-    const LifeState& targetStateMirrored,
-    const NeighbourCount& targetCountMirrored,
-    const std::vector<ComponentTemplate>& templates,
-    const LifeState& candidateMask,
-    std::vector<TemplateAnchor>& results,
-    TraversalDebug* dbg = nullptr,
-    unsigned depth = 0) {
+inline void TraverseTemplateTree(int nodeIdx, const TemplateTree& tree,
+                                 const LifeState& targetState, const NeighbourCount& targetCount,
+                                 const LifeState& targetStateMirrored,
+                                 const NeighbourCount& targetCountMirrored,
+                                 const std::vector<ComponentTemplate>& templates,
+                                 const LifeState& candidateMask,
+                                 std::vector<TemplateAnchor>& results,
+                                 TraversalDebug* dbg = nullptr, unsigned depth = 0) {
   if (nodeIdx < 0)
     return;
 
   if (candidateMask.IsEmpty()) {
-    if (dbg) dbg->pruned++;
+    if (dbg)
+      dbg->pruned++;
     return;
   }
 
-  if (dbg) dbg->nodesVisited++;
+  if (dbg)
+    dbg->nodesVisited++;
 
   const TemplateTreeNode& node = tree.nodes[nodeIdx];
   if (node.leaf) {
-    if (dbg) dbg->leavesVisited++;
+    if (dbg)
+      dbg->leavesVisited++;
 
     // Tree anchors and template placements differ by the entry's translation.
     // Most leaves have only one or two candidate anchors. Keep their coordinates
     // in a small buffer, avoiding an allocation or mask copy per template.
     constexpr unsigned maxDirectCandidates = 8;
     unsigned candidateCount = candidateMask.GetPop();
-    std::array<std::pair<int,int>,maxDirectCandidates> candidates;
+    std::array<std::pair<int, int>, maxDirectCandidates> candidates;
     if (candidateCount <= maxDirectCandidates) {
       LifeState remaining = candidateMask;
-      for (unsigned i=0;i<candidateCount;++i) {
-        candidates[i]=remaining.FirstOn();
-        remaining.Erase(candidates[i].first,candidates[i].second);
+      for (unsigned i = 0; i < candidateCount; ++i) {
+        candidates[i] = remaining.FirstOn();
+        remaining.Erase(candidates[i].first, candidates[i].second);
       }
     }
-    const std::array<const LifeState*,5> fields{
-        &targetState,&targetCount.bit0,&targetCount.bit1,&targetCount.bit2,&targetState};
+    const std::array<const LifeState*, 5> fields{&targetState, &targetCount.bit0, &targetCount.bit1,
+                                                 &targetCount.bit2, &targetState};
     for (const auto& entry : node.templates) {
       int templIdx = entry.templateIndex;
-      if (dbg) dbg->templatesVisited++;
+      if (dbg)
+        dbg->templatesVisited++;
       if (entry.fixedTranslation && candidateCount <= maxDirectCandidates) {
-        if (dbg) dbg->boundedTemplates++;
-        for (unsigned i=0;i<candidateCount;++i) {
-          auto [x,y]=candidates[i];
-          x+=entry.dx; y+=entry.dy;
-          if (MatchesAt(tree.matchCells[templIdx],fields,x,y)) {
-            results.push_back({templIdx,-int(torus_wrap(-x)),-int(torus_wrap(-y))});
-            if (dbg) dbg->anchorsFound++;
+        if (dbg)
+          dbg->boundedTemplates++;
+        for (unsigned i = 0; i < candidateCount; ++i) {
+          auto [x, y] = candidates[i];
+          x += entry.dx;
+          y += entry.dy;
+          if (MatchesAt(tree.matchCells[templIdx], fields, x, y)) {
+            results.push_back({templIdx, -int(torus_wrap(-x)), -int(torus_wrap(-y))});
+            if (dbg)
+              dbg->anchorsFound++;
           }
         }
       } else {
-        if (dbg) dbg->fullTemplates++;
-        auto matches = templates[templIdx].MatchReverseMirrored(targetStateMirrored,targetCountMirrored);
-        for (auto [x,y] : matches.OnCells()) {
-          results.push_back({templIdx,-x,-y});
-          if (dbg) dbg->anchorsFound++;
+        if (dbg)
+          dbg->fullTemplates++;
+        auto matches =
+            templates[templIdx].MatchReverseMirrored(targetStateMirrored, targetCountMirrored);
+        for (auto [x, y] : matches.OnCells()) {
+          results.push_back({templIdx, -x, -y});
+          if (dbg)
+            dbg->anchorsFound++;
         }
       }
     }
@@ -475,9 +481,14 @@ inline void TraverseTemplateTree(
 
   LifeState fieldMask = FieldMask(targetState, targetCount, node.field, node.dx, node.dy);
 
-  TraverseTemplateTree(node.yesChild, tree, targetState, targetCount, targetStateMirrored, targetCountMirrored, templates, candidateMask & fieldMask, results, dbg, depth + 1);
-  TraverseTemplateTree(node.noChild, tree, targetState, targetCount, targetStateMirrored, targetCountMirrored, templates, candidateMask & ~fieldMask, results, dbg, depth + 1);
-  TraverseTemplateTree(node.maybeChild, tree, targetState, targetCount, targetStateMirrored, targetCountMirrored, templates, candidateMask, results, dbg, depth + 1);
+  TraverseTemplateTree(node.yesChild, tree, targetState, targetCount, targetStateMirrored,
+                       targetCountMirrored, templates, candidateMask & fieldMask, results, dbg,
+                       depth + 1);
+  TraverseTemplateTree(node.noChild, tree, targetState, targetCount, targetStateMirrored,
+                       targetCountMirrored, templates, candidateMask & ~fieldMask, results, dbg,
+                       depth + 1);
+  TraverseTemplateTree(node.maybeChild, tree, targetState, targetCount, targetStateMirrored,
+                       targetCountMirrored, templates, candidateMask, results, dbg, depth + 1);
 }
 
 inline void TraverseTemplateTree(

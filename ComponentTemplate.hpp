@@ -35,7 +35,8 @@ struct ComponentTemplate {
   void ShiftToFitTorus();
   // Canonicalise a template: find the symmetry/offset that minimises base/out hash
   // Optionally compute the symmetry-invariant identity hash in the same pass.
-  std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int> Canonicalise(uint64_t* matchingHash = nullptr) const;
+  std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int>
+  Canonicalise(uint64_t* matchingHash = nullptr) const;
 
   uint64_t GetHashNonSymmetrised() const;
   uint64_t GetHash() const;
@@ -100,19 +101,14 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
   for (unsigned background = 0; background <= 7; ++background) {
     LifeState cells = fixedCount.WithExactly(background);
     stable1 |= cells & everCount[background + 1];
-    if (background <= 6) stable2 |= cells & everCount[background + 2];
+    if (background <= 6)
+      stable2 |= cells & everCount[background + 2];
   }
   LifeState alwaysOff = ~component.base & ~everActive & everActive.ZOI();
   stable1 &= alwaysOff;
   stable2 &= alwaysOff;
 
-  return {partialBase,
-          knownOff,
-          count,
-          stable1,
-          stable2,
-          component.gliderSet,
-          partialOut};
+  return {partialBase, knownOff, count, stable1, stable2, component.gliderSet, partialOut};
 }
 
 LifeState ComponentTemplate::MatchReverse(const LifeState &state, const NeighbourCount &stateCount) const {
@@ -185,8 +181,9 @@ ComponentTemplate ComponentTemplate::Moved(std::pair<int, int> p) const {
 
 std::pair<int, int> ComponentTemplate::NormalisingOffset() const {
   const auto& anchor = base.IsEmpty() ? out : base;
-  if (anchor.IsEmpty()) return {0,0};
-  auto [xs,ys] = anchor.ToroidalBoundsStarts();
+  if (anchor.IsEmpty())
+    return {0, 0};
+  auto [xs, ys] = anchor.ToroidalBoundsStarts();
   if (std::has_single_bit(xs) && std::has_single_bit(ys))
     return {-int(std::countr_zero(xs)), -int(std::countr_zero(ys))};
 
@@ -194,15 +191,19 @@ std::pair<int, int> ComponentTemplate::NormalisingOffset() const {
   // rather than their absolute positions on the torus.
   uint64_t bestHash = ~uint64_t(0);
   ComponentTemplate best;
-  std::pair<int,int> offset;
+  std::pair<int, int> offset;
   bool found = false;
-  for (uint64_t xChoices=xs; xChoices; xChoices &= xChoices-1)
-    for (uint64_t yChoices=ys; yChoices; yChoices &= yChoices-1) {
-      std::pair<int,int> candidate{-int(std::countr_zero(xChoices)), -int(std::countr_zero(yChoices))};
+  for (uint64_t xChoices = xs; xChoices; xChoices &= xChoices - 1)
+    for (uint64_t yChoices = ys; yChoices; yChoices &= yChoices - 1) {
+      std::pair<int, int> candidate{-int(std::countr_zero(xChoices)),
+                                    -int(std::countr_zero(yChoices))};
       auto t = Moved(candidate);
-      auto hash = combine_hashes(t.base.GetHash(),t.out.GetHash());
+      auto hash = combine_hashes(t.base.GetHash(), t.out.GetHash());
       if (!found || hash < bestHash || (hash == bestHash && t < best)) {
-        found = true; bestHash = hash; best = std::move(t); offset = candidate;
+        found = true;
+        bestHash = hash;
+        best = std::move(t);
+        offset = candidate;
       }
     }
   return offset;
@@ -218,44 +219,55 @@ void ComponentTemplate::ShiftToFitTorus() {
 }
 
 bool ComponentTemplate::operator<(const ComponentTemplate& other) const {
-    // Requirements first, then the salvo, for a stable representative.
-    for (auto [a,b] : {std::pair{&base,&other.base}, {&out,&other.out}, {&knownOff,&other.knownOff},
-                       {&count.bit0,&other.count.bit0}, {&count.bit1,&other.count.bit1}, {&count.bit2,&other.count.bit2},
-                       {&stable1,&other.stable1}, {&stable2,&other.stable2},
-                       {&gliderSet.se,&other.gliderSet.se}, {&gliderSet.sw,&other.gliderSet.sw},
-                       {&gliderSet.nw,&other.gliderSet.nw}, {&gliderSet.ne,&other.gliderSet.ne},
-                       {&count.bit3,&other.count.bit3}}) {
-        for (unsigned i=0;i<N;++i)
-            if (a->state[i]!=b->state[i]) return a->state[i]<b->state[i];
-    }
-    return false;
+  // Requirements first, then the salvo, for a stable representative.
+  for (auto [a, b] : {std::pair{&base, &other.base},
+                      {&out, &other.out},
+                      {&knownOff, &other.knownOff},
+                      {&count.bit0, &other.count.bit0},
+                      {&count.bit1, &other.count.bit1},
+                      {&count.bit2, &other.count.bit2},
+                      {&stable1, &other.stable1},
+                      {&stable2, &other.stable2},
+                      {&gliderSet.se, &other.gliderSet.se},
+                      {&gliderSet.sw, &other.gliderSet.sw},
+                      {&gliderSet.nw, &other.gliderSet.nw},
+                      {&gliderSet.ne, &other.gliderSet.ne},
+                      {&count.bit3, &other.count.bit3}}) {
+    for (unsigned i = 0; i < N; ++i)
+      if (a->state[i] != b->state[i])
+        return a->state[i] < b->state[i];
+  }
+  return false;
 }
 
-std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int> ComponentTemplate::Canonicalise(uint64_t* matchingHash) const {
-    if (matchingHash) *matchingHash = ~uint64_t(0);
-    uint64_t minHash = 0;
-    ComponentTemplate best = *this;
-    SymmetryTransform bestT = SymmetryTransform::Identity;
-    int bestDx = 0;
-    int bestDy = 0;
+std::tuple<ComponentTemplate, uint64_t, SymmetryTransform, int, int>
+ComponentTemplate::Canonicalise(uint64_t* matchingHash) const {
+  if (matchingHash)
+    *matchingHash = ~uint64_t(0);
+  uint64_t minHash = 0;
+  ComponentTemplate best = *this;
+  SymmetryTransform bestT = SymmetryTransform::Identity;
+  int bestDx = 0;
+  int bestDy = 0;
 
-    using enum SymmetryTransform;
-    for (auto transform : {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY,
-                           Rotate90, Rotate180OddBoth, Rotate270, ReflectAcrossYeqNegXP1}) {
-        ComponentTemplate t = this->Transformed(transform);
-        auto [dx,dy] = t.NormalisingOffset();
-        t = t.Moved({dx, dy});
-        if (matchingHash) *matchingHash = std::min(*matchingHash, t.GetHashNonSymmetrised());
-        uint64_t hash = combine_hashes(t.base.GetHash(), t.out.GetHash());
-        if (minHash == 0 || hash < minHash || (hash == minHash && t < best)) {
-            minHash = hash;
-            best = t;
-            bestT = transform;
-            bestDx = dx;
-            bestDy = dy;
-        }
+  using enum SymmetryTransform;
+  for (auto transform : {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY, Rotate90,
+                         Rotate180OddBoth, Rotate270, ReflectAcrossYeqNegXP1}) {
+    ComponentTemplate t = this->Transformed(transform);
+    auto [dx, dy] = t.NormalisingOffset();
+    t = t.Moved({dx, dy});
+    if (matchingHash)
+      *matchingHash = std::min(*matchingHash, t.GetHashNonSymmetrised());
+    uint64_t hash = combine_hashes(t.base.GetHash(), t.out.GetHash());
+    if (minHash == 0 || hash < minHash || (hash == minHash && t < best)) {
+      minHash = hash;
+      best = t;
+      bestT = transform;
+      bestDx = dx;
+      bestDy = dy;
     }
-    return {best, minHash, bestT, bestDx, bestDy};
+  }
+  return {best, minHash, bestT, bestDx, bestDy};
 }
 
 uint64_t ComponentTemplate::GetHashNonSymmetrised() const {

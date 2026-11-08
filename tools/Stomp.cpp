@@ -139,14 +139,11 @@ public:
   static bool IsPromising(const Component& comp);
 
   // Find all possible synthesis steps for a given pattern
-  static std::vector<SynthesisResult> FindSynthesisSteps(
-      const LifeState &targetPattern,
-      const std::string& targetApgcode,
-      const std::vector<ComponentTemplate> &templates,
-      const TemplateTree& templateTree,
-      int maxPrecursorPop,
-      bool filterPromising,
-      bool verbose = false);
+  static std::vector<SynthesisResult>
+  FindSynthesisSteps(const LifeState& targetPattern, const std::string& targetApgcode,
+                     const std::vector<ComponentTemplate>& templates,
+                     const TemplateTree& templateTree, int maxPrecursorPop, bool filterPromising,
+                     bool verbose = false);
 
   static void RunSynthesis(
       const std::vector<std::string> &transferComponentFiles,
@@ -206,45 +203,33 @@ private:
   static void ProcessSearchQueue(SearchContext& ctx, ComponentDatabase& miniDb);
 
   // Process a single synthesis result
-  static void ProcessSynthesis(
-      SynthesisResult& synthesis,
-      SearchContext& ctx,
-      ComponentDatabase& miniDb,
-      int depth);
+  static void ProcessSynthesis(SynthesisResult& synthesis, SearchContext& ctx,
+                               ComponentDatabase& miniDb, int depth);
 
   // Add database precursors to search queue
-  static void AddDatabasePrecursors(
-      const std::string& currentApgcode,
-      SearchContext& ctx,
-      ComponentDatabase& miniDb,
-      int depth);
+  static void AddDatabasePrecursors(const std::string& currentApgcode, SearchContext& ctx,
+                                    ComponentDatabase& miniDb, int depth);
 };
 
 std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesisSteps(
-    const LifeState& targetPattern,
-    const std::string& targetApgcode,
-    const std::vector<ComponentTemplate>& templates,
-    const TemplateTree& templateTree,
-    int maxPrecursorPop,
-    bool filterPromising,
-    bool verbose) {
+    const LifeState& targetPattern, const std::string& targetApgcode,
+    const std::vector<ComponentTemplate>& templates, const TemplateTree& templateTree,
+    int maxPrecursorPop, bool filterPromising, bool verbose) {
 
   std::vector<SynthesisResult> results;
 
   std::vector<TemplateAnchor> anchors;
   TraversalDebug dbg;
-  TraverseTemplateTree(templateTree,
-                       targetPattern,
-                       templates,
-                       anchors,
-                       verbose ? &dbg : nullptr);
+  TraverseTemplateTree(templateTree, targetPattern, templates, anchors, verbose ? &dbg : nullptr);
 
   // Exact patterns repeat across different glider reactions. The cache lasts
   // only for this orientation, and equality checks the full pattern on collisions.
   struct PatternHash {
-    size_t operator()(const LifeState& pattern) const { return pattern.GetHash(); }
+    size_t operator()(const LifeState& pattern) const {
+      return pattern.GetHash();
+    }
   };
-  std::unordered_map<LifeState,std::string,PatternHash> precursorCodes;
+  std::unordered_map<LifeState, std::string, PatternHash> precursorCodes;
   precursorCodes.reserve(anchors.size());
 
   for (const auto& anchor : anchors) {
@@ -255,19 +240,22 @@ std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesis
 
       Component resultComp;
       resultComp.base = (targetPattern & ~transformedOut) | transformedBase;
-      if (resultComp.base.GetPop() > static_cast<unsigned>(maxPrecursorPop)) continue;
+      if (resultComp.base.GetPop() > static_cast<unsigned>(maxPrecursorPop))
+        continue;
       resultComp.gliderSet = templ.gliderSet.Moved({anchor.x, anchor.y});
       resultComp.out = targetPattern;
 
       resultComp.ShiftToFitTorus();
 
-      if (!resultComp.SanityCheck()) continue;
-      if (filterPromising && !IsPromising(resultComp)) continue;
+      if (!resultComp.SanityCheck())
+        continue;
+      if (filterPromising && !IsPromising(resultComp))
+        continue;
 
       auto code = precursorCodes.find(resultComp.base);
       if (code == precursorCodes.end()) {
         auto encoded = resultComp.base.EncodeApgcode();
-        code = precursorCodes.emplace(resultComp.base,std::move(encoded)).first;
+        code = precursorCodes.emplace(resultComp.base, std::move(encoded)).first;
       }
       results.emplace_back(resultComp, code->second, targetApgcode);
     } catch (const std::exception&) {
@@ -275,12 +263,9 @@ std::vector<TransferSynthesis::SynthesisResult> TransferSynthesis::FindSynthesis
     }
   }
   if (verbose) {
-    std::cerr << "Tree traversal: nodes=" << dbg.nodesVisited
-              << " leaves=" << dbg.leavesVisited
-              << " pruned=" << dbg.pruned
-              << " templates=" << dbg.templatesVisited
-              << " anchors=" << dbg.anchorsFound
-              << " components=" << results.size() << std::endl;
+    std::cerr << "Tree traversal: nodes=" << dbg.nodesVisited << " leaves=" << dbg.leavesVisited
+              << " pruned=" << dbg.pruned << " templates=" << dbg.templatesVisited
+              << " anchors=" << dbg.anchorsFound << " components=" << results.size() << std::endl;
   }
 
   return results;
@@ -399,8 +384,7 @@ bool TransferSynthesis::IsPromising(const Component& comp) {
   auto base_components = comp.base.StillComponents();
   auto out_components = comp.out.StillComponents();
 
-  if (IsSparse(comp.base, base_components) &&
-      IsSparse(comp.out, out_components)) {
+  if (IsSparse(comp.base, base_components) && IsSparse(comp.out, out_components)) {
     return false;
   }
 
@@ -441,7 +425,6 @@ bool TransferSynthesis::IsPromising(const Component& comp) {
 
   return true;
 }
-
 
 inline bool PassesCostFilter(const std::string& inData, const std::string& outData,
                              const std::unordered_map<std::string, SearchResult>* costDb,
@@ -532,7 +515,7 @@ void TransferSynthesis::RunSynthesis(
       std::cerr << " (new synthesis)";
     }
     std::cerr << std::endl;
-    
+
     // Each worker owns its synthesis edges until the search completes.
     std::vector<ComponentDatabase> workerDbs(numThreads);
     std::unordered_set<std::string> processed;
@@ -566,30 +549,28 @@ void TransferSynthesis::RunSynthesis(
     }
     
     std::atomic<int> processCount{0};
-    
-    SearchContext ctx = {
-      .searchQueue = searchQueue,
-      .processed = processed,
-      .allVisitedApgcodes = allVisitedApgcodes,
-      .templates = templates,
-      .templateTree = templateTree,
-      .minPaths = minPaths,
-      .reverseLookup = reverseLookup,
-      .forbiddenApgcodes = forbiddenApgcodes,
-      .maxDepth = maxDepth,
-      .maxPrecursorPop = maxPrecursorPop,
-      .outputVisitedApgcodes = outputVisitedApgcodes,
-      .acceptFirst = acceptFirst,
-      .verbose = verbose,
-      .targetCost = targetCost,
-      .optimalPopThreshold = optimalPopThreshold,
-      .processCount = processCount,
-      .processedMutex = processedMutex,
-      .visitedApgcodesMutex = visitedApgcodesMutex,
-      .cerrMutex = cerrMutex,
-      .shouldStop = shouldStop
-    };
-    
+
+    SearchContext ctx = {.searchQueue = searchQueue,
+                         .processed = processed,
+                         .allVisitedApgcodes = allVisitedApgcodes,
+                         .templates = templates,
+                         .templateTree = templateTree,
+                         .minPaths = minPaths,
+                         .reverseLookup = reverseLookup,
+                         .forbiddenApgcodes = forbiddenApgcodes,
+                         .maxDepth = maxDepth,
+                         .maxPrecursorPop = maxPrecursorPop,
+                         .outputVisitedApgcodes = outputVisitedApgcodes,
+                         .acceptFirst = acceptFirst,
+                         .verbose = verbose,
+                         .targetCost = targetCost,
+                         .optimalPopThreshold = optimalPopThreshold,
+                         .processCount = processCount,
+                         .processedMutex = processedMutex,
+                         .visitedApgcodesMutex = visitedApgcodesMutex,
+                         .cerrMutex = cerrMutex,
+                         .shouldStop = shouldStop};
+
     // Create worker threads
     std::vector<std::thread> workers;
     for (int i = 0; i < numThreads; ++i) {
@@ -602,7 +583,8 @@ void TransferSynthesis::RunSynthesis(
     }
 
     ComponentDatabase miniDb;
-    for (auto& workerDb : workerDbs) miniDb.MergeFrom(std::move(workerDb));
+    for (auto& workerDb : workerDbs)
+      miniDb.MergeFrom(std::move(workerDb));
     auto results = miniDb.Dijkstra();
     unsigned foundCost = std::numeric_limits<unsigned>::max();
 
@@ -705,7 +687,6 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx, ComponentDatabase
       // Add to mini database as a seed
       {
         miniDb.InsertIfBetter("", it->second.cost, currentApgcode, ">>" + currentApgcode);
-
       }
       // if (it->second.cost + depth <= targetCost)
       {
@@ -742,11 +723,14 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx, ComponentDatabase
       LifeState targetPattern = LifeState::DecodeApgcode(currentApgcode);
       auto orientations = targetPattern.SymmetryOrbit();
       // The last step may use a database precursor above the intermediate limit.
-      int maxPop = depth == ctx.maxDepth - 1 ? std::numeric_limits<int>::max() : ctx.maxPrecursorPop;
-      
+      int maxPop =
+          depth == ctx.maxDepth - 1 ? std::numeric_limits<int>::max() : ctx.maxPrecursorPop;
+
       for (const LifeState& pattern : orientations) {
-        auto syntheses = FindSynthesisSteps(pattern, currentApgcode, ctx.templates, ctx.templateTree, maxPop, depth + 1 < ctx.maxDepth, ctx.verbose);
-        
+        auto syntheses =
+            FindSynthesisSteps(pattern, currentApgcode, ctx.templates, ctx.templateTree, maxPop,
+                               depth + 1 < ctx.maxDepth, ctx.verbose);
+
         for (auto& synthesis : syntheses) {
           ProcessSynthesis(synthesis, ctx, miniDb, depth);
 
@@ -771,11 +755,8 @@ void TransferSynthesis::ProcessSearchQueue(SearchContext& ctx, ComponentDatabase
   ctx.searchQueue.unregister_thread();
 }
 
-void TransferSynthesis::ProcessSynthesis(
-    SynthesisResult& synthesis,
-    SearchContext& ctx,
-    ComponentDatabase& miniDb,
-    int depth) {
+void TransferSynthesis::ProcessSynthesis(SynthesisResult& synthesis, SearchContext& ctx,
+                                         ComponentDatabase& miniDb, int depth) {
 
   if (ctx.forbiddenApgcodes.contains(synthesis.precursorApgcode)) {
     return;
@@ -783,9 +764,8 @@ void TransferSynthesis::ProcessSynthesis(
 
   synthesis.component.ShiftToFitTorus();
   unsigned componentCost = synthesis.component.Cost();
-  miniDb.InsertIfBetterLazy(
-      synthesis.precursorApgcode, componentCost, synthesis.targetApgcode,
-      [&] { return synthesis.component.Realise().RLE(); });
+  miniDb.InsertIfBetterLazy(synthesis.precursorApgcode, componentCost, synthesis.targetApgcode,
+                            [&] { return synthesis.component.Realise().RLE(); });
 
   // If we're at max depth, do database lookup immediately
   if (depth + 1 >= ctx.maxDepth) {
@@ -836,12 +816,9 @@ void TransferSynthesis::ProcessSynthesis(
   }
 }
 
-void TransferSynthesis::AddDatabasePrecursors(
-    const std::string& currentApgcode,
-    SearchContext& ctx,
-    ComponentDatabase& miniDb,
-    int depth) {
-  
+void TransferSynthesis::AddDatabasePrecursors(const std::string& currentApgcode, SearchContext& ctx,
+                                              ComponentDatabase& miniDb, int depth) {
+
   auto reverseIt = ctx.reverseLookup.find(currentApgcode);
   if (reverseIt != ctx.reverseLookup.end()) {
     for (const auto& [cost, precursorApgcode, compLine] : reverseIt->second) {
@@ -867,7 +844,6 @@ void TransferSynthesis::AddDatabasePrecursors(
     }
   }
 }
-
 
 std::vector<std::string> TransferSynthesis::ReadTargetFile(const std::string& filename) {
     std::vector<std::string> targets;

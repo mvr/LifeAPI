@@ -37,14 +37,16 @@ public:
   bool InsertIfBetter(const std::string& precursorApgcode, unsigned cost, const std::string& targetApgcode, const std::string& compLine);
 
   // Search workers own their databases, so payload generation needs no lock.
-  template<typename MakeLine>
+  template <typename MakeLine>
   bool InsertIfBetterLazy(const std::string& precursorApgcode, unsigned cost,
-                         const std::string& targetApgcode, MakeLine&& makeLine) {
+                          const std::string& targetApgcode, MakeLine&& makeLine) {
     auto& edges = db[precursorApgcode];
     auto existing = edges.end();
     for (auto edge = edges.begin(); edge != edges.end(); ++edge) {
-      if (std::get<1>(*edge) != targetApgcode) continue;
-      if (std::get<0>(*edge) <= cost) return false;
+      if (std::get<1>(*edge) != targetApgcode)
+        continue;
+      if (std::get<0>(*edge) <= cost)
+        return false;
       existing = edge;
     }
     if (existing != edges.end()) {
