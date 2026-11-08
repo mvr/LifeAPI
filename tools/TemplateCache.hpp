@@ -105,14 +105,6 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
         return (a & ~b).IsEmpty();
     };
 
-    auto isMoreGeneral = [&](const ComponentTemplate& a, const ComponentTemplate& b) {
-        return // isSubset(a.knownOff, b.knownOff) &&
-               isSubset(a.count.bit0, b.count.bit0) &&
-               isSubset(a.count.bit1, b.count.bit1) &&
-               isSubset(a.count.bit2, b.count.bit2) &&
-               isSubset(a.count.bit3, b.count.bit3);
-    };
-
     if (verbose) {
         std::cerr << "Combining and deduplicating " << templates.size()
                   << " templates across all files" << std::endl;
@@ -163,6 +155,44 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
             for (auto& t : vec) result.push_back(std::move(t));
             continue;
         }
+        std::sort(vec.begin(), vec.end(), [](const ComponentTemplate& a, const ComponentTemplate& b) {
+            if (a.gliderSet.Cost() != b.gliderSet.Cost()) return a.gliderSet.Cost() < b.gliderSet.Cost();
+            return a < b;
+        });
+        // Symmetries of the common live geometry may align the constraints
+        // differently even after canonicalization.
+        std::vector<std::tuple<SymmetryTransform,int,int>> alignments;
+        using enum SymmetryTransform;
+        for (auto tf : {Identity, ReflectAcrossX, ReflectAcrossYeqX, ReflectAcrossY,
+                        Rotate90, Rotate180OddBoth, Rotate270, ReflectAcrossYeqNegXP1}) {
+            auto base = vec.front().base.Transformed(tf), out = vec.front().out.Transformed(tf);
+            bool useBase = !base.IsEmpty() && (out.IsEmpty() || base.GetPop()<=out.GetPop());
+            const auto& anchor = useBase ? base : out;
+            const auto& reference = useBase ? vec.front().base : vec.front().out;
+            if (anchor.IsEmpty()) { alignments.emplace_back(tf,0,0); continue; }
+            auto [x,y] = anchor.FirstOn();
+            for (auto [rx,ry] : reference.OnCells()) {
+                int dx = rx-x, dy = ry-y;
+                if (base.Moved(dx,dy)==vec.front().base && out.Moved(dx,dy)==vec.front().out)
+                    alignments.emplace_back(tf,dx,dy);
+            }
+        }
+        auto isMoreGeneral = [&](const ComponentTemplate& a, const ComponentTemplate& b) {
+            if (a.gliderSet.Cost()>b.gliderSet.Cost() || a.base!=b.base || a.out!=b.out) return false;
+            for (auto [tf,dx,dy] : alignments) {
+                if (tf==Identity && dx==0 && dy==0) {
+                    if (isSubset(a.knownOff,b.knownOff) && isSubset(a.count.bit0,b.count.bit0) &&
+                        isSubset(a.count.bit1,b.count.bit1) && isSubset(a.count.bit2,b.count.bit2) &&
+                        isSubset(a.stable1,b.stable1) && isSubset(a.stable2,b.stable2)) return true;
+                } else if (isSubset(a.knownOff.Transformed(tf).Moved(dx,dy),b.knownOff) &&
+                           isSubset(a.count.bit0.Transformed(tf).Moved(dx,dy),b.count.bit0) &&
+                           isSubset(a.count.bit1.Transformed(tf).Moved(dx,dy),b.count.bit1) &&
+                           isSubset(a.count.bit2.Transformed(tf).Moved(dx,dy),b.count.bit2) &&
+                           isSubset(a.stable1.Transformed(tf).Moved(dx,dy),b.stable1) &&
+                           isSubset(a.stable2.Transformed(tf).Moved(dx,dy),b.stable2)) return true;
+            }
+            return false;
+        };
         std::vector<ComponentTemplate> kept;
         for (auto& t : vec) {
             bool dominated = false;
