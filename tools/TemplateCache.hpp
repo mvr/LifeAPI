@@ -121,15 +121,18 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
     // Count occurrences
     std::unordered_map<uint64_t, std::tuple<ComponentTemplate, unsigned>> templateCounts; // template, count
     for (const auto& templ : templates) {
-        uint64_t hash = templ.GetHash();
+        uint64_t hash;
+        auto [canon, liveHash, transform, dx, dy] = templ.Canonicalise(&hash);
+        (void)liveHash; (void)transform; (void)dx; (void)dy;
         auto it = templateCounts.find(hash);
         if (it == templateCounts.end()) {
-            templateCounts[hash] = std::make_tuple(templ, 1);
+            templateCounts[hash] = std::make_tuple(std::move(canon), 1);
         } else {
             auto& [existingTempl, count] = it->second;
             count++;
-            if (templ.gliderSet.Cost() < existingTempl.gliderSet.Cost()) {
-                existingTempl = templ;
+            if (canon.gliderSet.Cost() < existingTempl.gliderSet.Cost() ||
+                (canon.gliderSet.Cost() == existingTempl.gliderSet.Cost() && canon < existingTempl)) {
+                existingTempl = std::move(canon);
             }
         }
     }
@@ -147,10 +150,9 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
     }
 
     std::unordered_map<uint64_t, std::vector<ComponentTemplate>> groups;
-    for (const auto& templ : candidates) {
-        auto [canon, hash, t, dx, dy] = templ.Canonicalise();
-        (void)t; (void)dx; (void)dy;
-        groups[hash].push_back(std::move(canon));
+    for (auto& templ : candidates) {
+        auto hash = combine_hashes(templ.base.GetHash(), templ.out.GetHash());
+        groups[hash].push_back(std::move(templ));
     }
 
     std::vector<ComponentTemplate> result;
@@ -189,6 +191,7 @@ std::vector<ComponentTemplate> TemplateCache::CombineAndDeduplicateTemplates(
                   << ")" << std::endl;
     }
     
+    std::sort(result.begin(), result.end());
     return result;
 }
 
@@ -465,12 +468,14 @@ std::vector<ComponentTemplate> TemplateCache::ExtractTemplatesFromComponentsFile
                 continue;
             }
             
-            ComponentTemplate templ = ComponentTemplate::FromComponent(comp);
-            uint64_t hash = templ.GetHash();
+            uint64_t hash;
+            auto [templ, liveHash, transform, dx, dy] = ComponentTemplate::FromComponent(comp).Canonicalise(&hash);
+            (void)liveHash; (void)transform; (void)dx; (void)dy;
             auto it = uniqueTemplates.find(hash);
             if (it == uniqueTemplates.end()) {
                 uniqueTemplates[hash] = templ;
-            } else if (templ.gliderSet.Cost() < it->second.gliderSet.Cost()) {
+            } else if (templ.gliderSet.Cost() < it->second.gliderSet.Cost() ||
+                       (templ.gliderSet.Cost() == it->second.gliderSet.Cost() && templ < it->second)) {
                 it->second = templ;
             }
 
