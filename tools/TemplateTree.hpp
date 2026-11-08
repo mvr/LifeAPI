@@ -433,30 +433,40 @@ inline void TraverseTemplateTree(
     if (dbg) dbg->leavesVisited++;
 
     // Tree anchors and template placements differ by the entry's translation.
-    // Check small candidate sets directly; retain convolution for larger sets
-    // and entries with more than one possible relative translation.
+    // Most leaves have only one or two candidate anchors. Keep their coordinates
+    // in a small buffer, avoiding an allocation or mask copy per template.
     constexpr unsigned maxDirectCandidates = 8;
     unsigned candidateCount = candidateMask.GetPop();
+    std::array<std::pair<int,int>,maxDirectCandidates> candidates;
+    if (candidateCount <= maxDirectCandidates) {
+      LifeState remaining = candidateMask;
+      for (unsigned i=0;i<candidateCount;++i) {
+        candidates[i]=remaining.FirstOn();
+        remaining.Erase(candidates[i].first,candidates[i].second);
+      }
+    }
     const std::array<const LifeState*,5> fields{
         &targetState,&targetCount.bit0,&targetCount.bit1,&targetCount.bit2,&targetState};
     for (const auto& entry : node.templates) {
       int templIdx = entry.templateIndex;
       if (dbg) dbg->templatesVisited++;
-      LifeState matches;
       if (entry.fixedTranslation && candidateCount <= maxDirectCandidates) {
         if (dbg) dbg->boundedTemplates++;
-        for (auto [x,y] : candidateMask.OnCells()) {
+        for (unsigned i=0;i<candidateCount;++i) {
+          auto [x,y]=candidates[i];
           x+=entry.dx; y+=entry.dy;
-          if (MatchesAt(tree.matchCells[templIdx],fields,x,y))
-            matches.SetSafe(-x,-y);
+          if (MatchesAt(tree.matchCells[templIdx],fields,x,y)) {
+            results.push_back({templIdx,-int(torus_wrap(-x)),-int(torus_wrap(-y))});
+            if (dbg) dbg->anchorsFound++;
+          }
         }
       } else {
         if (dbg) dbg->fullTemplates++;
-        matches = templates[templIdx].MatchReverseMirrored(targetStateMirrored,targetCountMirrored);
-      }
-      for (auto [x,y] : matches.OnCells()) {
-        results.push_back({templIdx,-x,-y});
-        if (dbg) dbg->anchorsFound++;
+        auto matches = templates[templIdx].MatchReverseMirrored(targetStateMirrored,targetCountMirrored);
+        for (auto [x,y] : matches.OnCells()) {
+          results.push_back({templIdx,-x,-y});
+          if (dbg) dbg->anchorsFound++;
+        }
       }
     }
 
