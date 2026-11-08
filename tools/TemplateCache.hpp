@@ -335,6 +335,15 @@ bool TemplateCache::ReadTemplatesCacheFile(const std::string& cacheFile, std::ve
             LifeState bit3 = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
             
             templ.count = NeighbourCount(bit3, bit2, bit1, bit0);
+
+            file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
+            data.resize(dataSize);
+            file.read(data.data(), dataSize);
+            templ.stable1 = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
+            file.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
+            data.resize(dataSize);
+            file.read(data.data(), dataSize);
+            templ.stable2 = LifeState::Parse(std::string(data.begin(), data.end())).Moved(32, 32);
             
             if (file.fail()) {
                 return false;
@@ -419,6 +428,13 @@ void TemplateCache::WriteTemplatesCacheFile(const std::string& cacheFile, const 
             dataSize = bit3RLE.size();
             file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
             file.write(bit3RLE.data(), dataSize);
+
+            for (const auto* guard : {&templ.stable1, &templ.stable2}) {
+                auto rle = guard->RLE();
+                dataSize = rle.size();
+                file.write(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
+                file.write(rle.data(), dataSize);
+            }
         }
         
     } catch (const std::exception&) {
