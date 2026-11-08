@@ -10,7 +10,10 @@ struct ComponentTemplate {
   LifeState base;
   LifeState knownOff;
   NeighbourCount count; // This should be more refined and use a full LifeStable
-  LifeState stable1; // Off cells that see 1 active neighbour (so shouldn't have 2 stable neighbours)
+  // Cells off throughout the recorded reaction that see one/two reaction
+  // neighbours after removing the unchanged background. They forbid two/one
+  // background neighbours respectively.
+  LifeState stable1;
   LifeState stable2;
   GliderSet gliderSet;
   LifeState out;
@@ -46,8 +49,7 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
   NeighbourCount startCount(component.base);
   LifeState everDifferentNeighbours;
   LifeState everMoreThanOne;
-  LifeState everOne;
-  LifeState everTwo;
+  std::array<LifeState, 9> everCount;
 
   unsigned gen = 0;
 
@@ -59,8 +61,8 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
     everActive |= state ^ component.base;
     everDifferentNeighbours |= count.Difference(startCount);
     everMoreThanOne |= count.bit1 | count.bit2 | count.bit3;
-    everOne |= count.bit0 & ~count.bit1 & ~count.bit2 & ~count.bit3;
-    everTwo |= ~count.bit0 & count.bit1 & ~count.bit2 & ~count.bit3;
+    for (unsigned neighbours = 1; neighbours <= 8; ++neighbours)
+      everCount[neighbours] |= count.WithExactly(neighbours);
 
     state.Step();
     gen++;
@@ -82,16 +84,32 @@ ComponentTemplate ComponentTemplate::FromComponent(const Component &component) {
 
   LifeState knownOff = ~component.base & ~component.out & everActive.ZOI();
 
-  LifeState stable1 = everOne & ~component.base & ~everActive & everActive.ZOI();
-  LifeState stable2 = everTwo & ~component.base & ~everActive & everActive.ZOI();
+  LifeState partialBase = component.base & relevant;
+  LifeState partialOut = component.out & relevant;
+  LifeState fixed = component.base & ~partialBase;
+  if (fixed != (component.out & ~partialOut) || !(fixed & everActive).IsEmpty())
+    throw std::runtime_error("Template background changes during the reaction");
 
-  return {component.base & relevant,
+  // The fixed neighbour count is constant. Subtract it from the recorded
+  // total counts without replaying the reaction or storing every generation.
+  NeighbourCount fixedCount(fixed);
+  LifeState stable1, stable2;
+  for (unsigned background = 0; background <= 7; ++background) {
+    LifeState cells = fixedCount.WithExactly(background);
+    stable1 |= cells & everCount[background + 1];
+    if (background <= 6) stable2 |= cells & everCount[background + 2];
+  }
+  LifeState alwaysOff = ~component.base & ~everActive & everActive.ZOI();
+  stable1 &= alwaysOff;
+  stable2 &= alwaysOff;
+
+  return {partialBase,
           knownOff,
           count,
           stable1,
           stable2,
           component.gliderSet,
-          component.out & relevant};
+          partialOut};
 }
 
 LifeState ComponentTemplate::MatchReverse(const LifeState &state, const NeighbourCount &stateCount) const {
@@ -210,6 +228,8 @@ uint64_t ComponentTemplate::GetHashNonSymmetrised() const {
   hash = combine_hashes(hash, count.bit0.GetHash());
   hash = combine_hashes(hash, count.bit1.GetHash());
   hash = combine_hashes(hash, count.bit2.GetHash());
+  hash = combine_hashes(hash, stable1.GetHash());
+  hash = combine_hashes(hash, stable2.GetHash());
   return hash;
 }
 
